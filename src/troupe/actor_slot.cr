@@ -204,7 +204,9 @@ module Troupe
         begin
           data = step.apply(data)
         rescue e : ::Exception
-          raise ActivationError.new("迁移 #{step.from_version}→#{step.to_version} 失败：#{e.class.name} #{e.message}", e)
+          from_v = step.from_version.as(Int32)
+          to_v = step.to_version.as(Int32)
+          raise ActivationError.new("迁移 #{from_v}→#{to_v} 失败：#{e.class.name} #{e.message}", e)
         end
       end
       begin

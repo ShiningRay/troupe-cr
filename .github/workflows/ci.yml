@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.22"
       - run: crystal spec
       - run: crystal tool format --check src spec
       - run: crystal build src/troupe.cr --no-codegen

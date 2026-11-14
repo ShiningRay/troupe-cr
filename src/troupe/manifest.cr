@@ -119,11 +119,11 @@ module Troupe
     def migration_path(from_version : Int32) : Array(::Troupe::MigrationStepBase)?
       return [] of ::Troupe::MigrationStepBase if from_version == @schema_version
       return nil if from_version > @schema_version || from_version < 1
-      steps = @migrations.sort_by(&.from_version)
+      steps = @migrations.sort_by { |step| step.from_version.as(Int32) }
       path = [] of ::Troupe::MigrationStepBase
       current = from_version
       while current < @schema_version
-        step = steps.find { |s| s.from_version == current }
+        step = steps.find { |s| s.from_version.as(Int32) == current }
         return nil unless step
         path << step
         current = step.to_version
@@ -154,13 +154,13 @@ module Troupe
     def validate! : Nil
       raise ArgumentError.new("角色 #{role} 缺少 schema_version") if @schema_version < 1
       raise ArgumentError.new("角色 #{role} 缺少 initial Props 工厂") unless @initial
-      froms = @migrations.map(&.from_version)
+      froms = @migrations.map { |step| step.from_version.as(Int32) }
       if froms.size != froms.uniq.size
         raise ArgumentError.new("角色 #{role} 存在重复迁移起点")
       end
-      steps = @migrations.sort_by(&.from_version)
+      steps = @migrations.sort_by { |step| step.from_version.as(Int32) }
       steps.each_with_index do |step, i|
-        if i > 0 && steps[i - 1].to_version != step.from_version
+        if i > 0 && steps[i - 1].to_version.as(Int32) != step.from_version.as(Int32)
           raise ArgumentError.new("角色 #{role} 迁移链在 #{step.from_version} 处断裂")
         end
       end

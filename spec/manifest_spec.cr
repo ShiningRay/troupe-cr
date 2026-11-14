@@ -13,8 +13,8 @@ describe Troupe::Manifest do
     end
 
     manifest.migration_path(3).should eq([] of Troupe::MigrationStepBase)
-    manifest.migration_path(1).not_nil!.map(&.from_version).should eq([1, 2])
-    manifest.migration_path(1).not_nil!.map(&.to_version).should eq([2, 3])
+    manifest.migration_path(1).not_nil!.map { |s| s.from_version.as(Int32) }.should eq([1, 2])
+    manifest.migration_path(1).not_nil!.map { |s| s.to_version.as(Int32) }.should eq([2, 3])
     manifest.migration_path(2).not_nil!.size.should eq(1)
     manifest.migration_path(4).should be_nil # 降级不支持
   end
