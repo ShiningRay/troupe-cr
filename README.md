@@ -2,7 +2,7 @@
 
 面向 Crystal 的 Virtual Actor 框架，语义对标 Orleans，沿用 Troupe 的剧团术语。
 
-> **当前状态：M1 单机最小核心（dev）。** 已实现 ActorId / Role manifest / Memory PropStore（CAS+fencing）/ Stage / Agent / ActorSlot（single-flight）/ 有界 CallBoard / Intermission / Rehearsal。尚未实现 SQLite/PostgreSQL Provider、TCP transport、集群路由、持久 reminder 与 Show；不要据此宣称 production-ready 或跨语言互操作。
+> **当前状态：M1 单机核心 + M2 本地持久化（dev）。** 已实现 ActorId / Role manifest / Memory 与 SQLite PropStore（CAS+fencing）/ Stage / Agent / ActorSlot（single-flight）/ 有界 CallBoard / Intermission / Rehearsal。SQLite Provider 仅进程/单机持久（`cross_node_safe? = false`，不能跨节点恢复）；尚未实现 PostgreSQL Provider、TCP transport、集群路由、持久 reminder 与 Show；不要据此宣称 production-ready 或跨语言互操作。
 
 ## 文档
 
@@ -63,9 +63,19 @@ result = Troupe::Agent.new(stage).call!(id, "add", JSON.parse(%({"item": "pear"}
 
 Turn 闭包走 JSON 参数/结果边界；`save` 以 revision CAS + epoch fencing 显式提交。测试请使用 `Troupe::Rehearsal`（固定 namespace、Memory Provider、虚拟时钟、pump 确定性调度）。
 
-## 首个实施阶段
+## 本地持久化（M2，开发用）
 
-按 [PLAN.md](PLAN.md) 已完成**单机最小核心**（M1）。下一阶段（M2）：本地持久化 Provider、观测与 API 硬化。
+```crystal
+store = Troupe::SQLitePropStore.open("./dev-troupe.db") # WAL 模式
+stage = Troupe::Stage.new(store: store, ownership: store.ownership)
+```
+
+SQLite Provider 的 CAS 与 fencing 均为单条 SQL 原子语句；进程重启后从文件恢复。
+注意：**仅进程/单机持久**（`store.cross_node_safe? == false`），不承诺节点丢失或跨机恢复。
+
+## 实施阶段
+
+按 [PLAN.md](PLAN.md) 已完成 M1 单机核心与 M2 的 SQLite 本地 Provider。M2 其余项：观测 metrics/trace、类型安全 Agent 宏、基准。
 
 ## 许可
 

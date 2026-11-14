@@ -116,6 +116,11 @@ end
 module TroupeFixtures
   extend self
 
+  # SQLite spec 用临时库文件路径（清理由调用方 ensure 处理，须先 close 释放句柄）。
+  def temp_db_path : String
+    Path.new(Dir.tempdir, "troupe-sqlite-spec-#{Random.new.next_int}.db").to_posix.to_s
+  end
+
   def counter_args(by : Int32) : JSON::Any
     JSON.parse(%({"by": #{by}}))
   end

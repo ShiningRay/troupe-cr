@@ -25,6 +25,10 @@
 
 production 必须拒绝不满足共享/fencing 合同的 Provider，而不是只打印 warning。
 
+实现状态（M2）：`PropStore#cross_node_safe?` 显式声明 Provider 能力——Memory/SQLite 均为 false
+（仅进程/单机持久，不能跨节点恢复）；SQLite Provider 的 CAS 与 fencing 均在单条 SQL 语句内原子完成，
+`write` 的 expectedRevision 与 epoch 都在 UPDATE 的 WHERE 中，无应用层先读后写。
+
 ## 失败语义
 
 - CAS/fencing/保存失败使实例失效，后续调用从最后已提交快照恢复。

@@ -2,7 +2,7 @@ require "./spec_helper"
 
 describe Troupe do
   it "exposes its development version" do
-    Troupe::VERSION.should eq("0.2.0-dev.0")
+    Troupe::VERSION.should eq("0.3.0-dev.0")
   end
 
   it "keeps the public API surface present" do
@@ -11,5 +11,6 @@ describe Troupe do
     Troupe::Rehearsal.should_not be_nil
     Troupe::ActorId.should_not be_nil
     Troupe::MemoryPropStore.should_not be_nil
+    Troupe::SQLitePropStore.should_not be_nil
   end
 end

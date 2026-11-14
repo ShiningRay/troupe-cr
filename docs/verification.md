@@ -70,3 +70,54 @@ CI（GitHub Actions `Checks`，ubuntu-latest，Crystal 1.22）：run 43598485671
 - Fiber 模式的消费 Fiber 为协作式调度：阻塞 C/CPU 密集 Turn 会延迟同 Stage 其他 Fiber，见 docs/execution-model.md 边界说明。
 - Intermission 的 sweep 为宿主显式调用；自动巡回调度列入 M2。
 - ownership fencing 的 Memory 实现只模拟单进程语义；跨节点接管需 M3 真实 Provider 证据。
+
+## M2（首项）：SQLite 本地 Provider（2026-11-14）
+
+### 环境
+
+- 同 M1 环境（DESKTOP-IBMH65K / win / Crystal 1.22.1 / MSYS2 ucrt64）
+- 依赖：sqlite3 shard 0.24.0（crystal-sqlite3）+ db 0.15.0（crystal-db）
+- 本机 MSYS2 包 mingw-w64-ucrt-x86_64-sqlite3 3.53.4（libsqlite3.a/sqlite3.h 于 C:\msys64\ucrt64）
+
+### Windows/MSYS2 可行性验证（探针，已删除）
+
+| 验证点 | 结果 |
+|---|---|
+| 链接 libsqlite3（MSYS2 ucrt64 工具链） | 通过，运行时无需额外 DLL 配置 |
+| 文件库写入/CAS（INSERT OR IGNORE、UPDATE WHERE revision=） | rows_affected 行为符合预期 |
+| 重开恢复 | close 后重新 DB.open 读取一致 |
+| 三斜杠 URI 绝对路径 `sqlite3:///C:/...` | 可用（`sqlite3://C:/...` 报 URI::Error bad port，不可用） |
+| `INSERT ... ON CONFLICT DO UPDATE RETURNING` | 支持（Int64 返回），用于单语句单调 acquire |
+| close 后删除文件（Windows 句柄释放） | 立即可删；未 close 的池连接持有句柄会阻止删除 |
+| WAL 模式（URI 参数 journal_mode=WAL） | 可用；close 后 sidecar 自动清理 |
+| 内存库 URI（`%3Amemory:`） | ConnectionRefused，不使用（Memory Provider 另有实现） |
+
+### 命令与结果
+
+```sh
+shards install
+crystal spec
+# 43 examples, 0 failures, 0 errors, 0 pending
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+CI（GitHub Actions `Checks`，ubuntu-latest，Crystal 1.22）：新增 `apt-get install libsqlite3-dev` 与 `shards install` 步骤（运行结果见仓库 Actions）。
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| SQLite PropStore 契约 | 与 Memory 契约一致：create 重复 → Conflict(:exists)；expectedRevision 过期 → Conflict(:revision) |
+| SQLite fencing 优先 | 旧 epoch 写即使 revision 匹配也拒绝（CallRejected(:ownership)） |
+| 重开恢复（Provider 层） | write→close→重新 open：revision/schema_version/data/epoch 与 ownership epoch 均持久 |
+| 重启恢复（Stage 端到端） | Stage shutdown → 重开 SQLite store 新建 Stage：increment 从已提交快照继续（5→8） |
+| Provider 能力声明 | `cross_node_safe?`：Memory/SQLite 均为 false（不能跨节点恢复） |
+
+### 未验证边界（不宣称）
+
+- SQLite Provider 只承诺进程/单机持久：**不承诺节点丢失或跨机恢复**（persistence.md Provider 层级）；production 接管语义（多节点 fencing/双活防护）待 M3 PostgreSQL 证据，`cross_node_safe? = false` 是显式能力声明。
+- 未验证多进程同时写同一 SQLite 文件的锁竞争行为（busy_timeout 5000ms 已设，但未做多进程反例）。
+- 未做性能基准（M2 后续项）。

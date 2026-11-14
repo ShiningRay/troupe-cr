@@ -32,9 +32,15 @@ module Troupe
   # - create 原子存在检查；已存在即 ConflictError(:exists)。
   # - write 以 expectedRevision + epoch 原子 CAS；fencing 必须在 Provider 层校验，
   #   epoch != current 一律拒绝（CallRejectedError(:ownership)），不允许应用层先读后写。
+  # - cross_node_safe? 声明 Provider 能力：SQLite/File/Memory 为 false（仅进程/单机持久，
+  #   不能用于跨节点恢复）；生产模式（M3）必须拒绝以此类 Provider 声称接管语义。
   abstract class PropStore
+    getter ownership : ::Troupe::OwnershipStore
+
     def initialize(@ownership : ::Troupe::OwnershipStore)
     end
+
+    abstract def cross_node_safe? : Bool
 
     abstract def read(actor_id : ::Troupe::ActorId) : ::Troupe::PropRecord?
 
@@ -54,6 +60,10 @@ module Troupe
   class MemoryPropStore < ::Troupe::PropStore
     @records = Hash(::Troupe::ActorId, ::Troupe::PropRecord).new
     @mutex = Mutex.new
+
+    def cross_node_safe? : Bool
+      false
+    end
 
     def read(actor_id : ::Troupe::ActorId) : ::Troupe::PropRecord?
       @mutex.synchronize { @records[actor_id]? }

@@ -1,8 +1,13 @@
 name: troupe
-version: 0.2.0-dev.0
-description: Troupe Virtual Actor framework for Crystal — M1 minimal single-machine core
+version: 0.3.0-dev.0
+description: Troupe Virtual Actor framework for Crystal — M1 core + M2 SQLite local persistence
 license: MIT
 crystal: ">= 1.22"
 
-# M1 无外部运行时依赖；本地持久化 Provider（M2）按 PLAN.md 引入。
+dependencies:
+  sqlite3:
+    github: crystal-lang/crystal-sqlite3
+    version: ">= 0.24.0"
+
+# 库 shard 无可执行入口；Actor 核心与 Provider 按 PLAN.md 分阶段实现。
 targets: {}

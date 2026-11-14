@@ -13,6 +13,8 @@ jobs:
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: "1.22"
+      - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      - run: shards install
       - run: crystal spec
       - run: crystal tool format --check src spec
       - run: crystal build src/troupe.cr --no-codegen
