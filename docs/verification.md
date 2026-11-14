@@ -31,6 +31,10 @@ crystal build src/troupe.cr --no-codegen
 # 通过
 ```
 
+CI（GitHub Actions `Checks`，ubuntu-latest，Crystal 1.22）：run 43598485671 success。
+首次 CI 运行在 linux 报 `can't infer block return type`（`Array(MigrationStepBase)` 虚拟类型的
+抽象方法 `&.from_version` 推断），已改为显式 `.as(Int32)` 并将 CI Crystal 固定 1.22。
+
 ### 已验证语义（含反例）
 
 | 语义 | 反例/验收 |
