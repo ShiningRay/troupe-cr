@@ -9,9 +9,13 @@ module Troupe
     getter clock : ::Troupe::Clock
     getter epoch : UInt64
     property revision : UInt64
+    getter idempotency : Hash(String, ::Troupe::IdempotencyRecord)
+    getter idempotency_retention : ::Time::Span
 
     def initialize(@store : ::Troupe::PropStore, @manifest : ::Troupe::ManifestBase,
-                   @clock : ::Troupe::Clock, @epoch : UInt64, @revision : UInt64)
+                   @clock : ::Troupe::Clock, @epoch : UInt64, @revision : UInt64,
+                   @idempotency : Hash(String, ::Troupe::IdempotencyRecord),
+                   @idempotency_retention : ::Time::Span)
     end
   end
 
@@ -21,11 +25,45 @@ module Troupe
     def initialize(@actor_id : ::Troupe::ActorId, @props : ::JSON::Serializable, @ctx : ::Troupe::ActivationContext)
     end
 
-    # 显式持久化：以 expectedRevision + epoch 原子 CAS 提交当前 Props。
+    # 显式持久化：以 expectedRevision + epoch 原子 CAS 提交当前 Props 与幂等记录。
     # 失败（CAS 冲突 / fencing 拒绝）会使实例失效：后续调用从最后已提交快照重新激活。
     def save : Nil
-      record = @ctx.store.write(actor_id, @ctx.revision, @ctx.manifest.schema_version, @props.to_json, @ctx.epoch)
+      record = @ctx.store.write(actor_id, @ctx.revision, @ctx.manifest.schema_version, @props.to_json, @ctx.epoch, @ctx.idempotency.values)
       @ctx.revision = record.revision
+    end
+
+    # 幂等执行（docs/persistence.md 失败语义；对齐 troupejs DESIGN §6.5）：
+    # - 同键同指纹 → 重放首次结果（或重抛首次错误，附带原始错误类别）；
+    # - 同键不同指纹 → IdempotencyConflictError；
+    # - fn 只修改内存 Props、不要 save：helper 在 fn settle 后把 Props 变更 + 幂等记录
+    #   **一次原子提交**（store.write 原子 CAS）；失败也记录，重放时按记录重抛；
+    # - 过期（expires_at）后同键视为新操作。保留期默认 7 天（StageConfig）。
+    def idempotent(key : String, fingerprint : String, &block : -> ::JSON::Any) : ::JSON::Any
+      ctx = @ctx
+      existing = ctx.idempotency[key]?
+      # 过期（expires_at <= now）后同键视为新操作；激活时装载与 Turn 内查找都做时效判定。
+      if existing && existing.expires_at > ctx.clock.now.to_unix
+        unless existing.fingerprint == fingerprint
+          raise IdempotencyConflictError.new("幂等键 #{key.inspect} 已用于不同参数指纹（#{existing.fingerprint} ≠ #{fingerprint}）")
+        end
+        if existing.ok
+          return ::JSON.parse(existing.value.not_nil!)
+        end
+        raise ::Exception.new("幂等重放：首次执行失败（#{existing.error_class}: #{existing.error_message}）")
+      end
+      expires_at = (ctx.clock.now + ctx.idempotency_retention).to_unix
+      begin
+        value = block.call
+      rescue e : ::Exception
+        ctx.idempotency[key] = IdempotencyRecord.new(key: key, fingerprint: fingerprint, ok: false,
+          expires_at: expires_at, error_class: e.class.name, error_message: e.message)
+        save
+        raise e
+      end
+      ctx.idempotency[key] = IdempotencyRecord.new(key: key, fingerprint: fingerprint, ok: true,
+        expires_at: expires_at, value: value.to_json)
+      save
+      value
     end
 
     # 生命周期钩子（可覆盖）。on_stage 抛错 → ActivationError；off_stage 抛错 → 记录事件仍执行下线。
@@ -44,10 +82,16 @@ module Troupe
   end
 
   # 单个 Turn 的调用上下文。clock 可注入：Rehearsal 中 Turn 体内推进虚拟时钟可确定性模拟耗时。
+  # cancel 为协作取消信号（CallFuture#cancel 置位，Turn 自行决定是否/如何响应）。
   record CallContext,
     call_id : UInt64,
     actor_id : ::Troupe::ActorId,
     method : ::String,
     deadline : ::Time,
-    clock : ::Troupe::Clock
+    clock : ::Troupe::Clock,
+    cancel : ::Troupe::CancelSignal do
+    def cancel_requested? : Bool
+      cancel.requested?
+    end
+  end
 end

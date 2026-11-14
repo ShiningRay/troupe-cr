@@ -32,6 +32,8 @@ module Troupe
   # - create 原子存在检查；已存在即 ConflictError(:exists)。
   # - write 以 expectedRevision + epoch 原子 CAS；fencing 必须在 Provider 层校验，
   #   epoch != current 一律拒绝（CallRejectedError(:ownership)），不允许应用层先读后写。
+  #   idempotency 记录与 Props 在同一次原子提交内落盘（失败则两者都不生效）。
+  # - idempotency 读取该 Actor 未过期的幂等记录（激活时装载）。
   # - cross_node_safe? 声明 Provider 能力：SQLite/File/Memory 为 false（仅进程/单机持久，
   #   不能用于跨节点恢复）；生产模式（M3）必须拒绝以此类 Provider 声称接管语义。
   abstract class PropStore
@@ -46,7 +48,10 @@ module Troupe
 
     abstract def create(actor_id : ::Troupe::ActorId, schema_version : Int32, data : String, epoch : UInt64) : ::Troupe::PropRecord
 
-    abstract def write(actor_id : ::Troupe::ActorId, expected_revision : UInt64, schema_version : Int32, data : String, epoch : UInt64) : ::Troupe::PropRecord
+    abstract def write(actor_id : ::Troupe::ActorId, expected_revision : UInt64, schema_version : Int32, data : String,
+                       epoch : UInt64, idempotency : Array(::Troupe::IdempotencyRecord) = [] of ::Troupe::IdempotencyRecord) : ::Troupe::PropRecord
+
+    abstract def idempotency(actor_id : ::Troupe::ActorId, now : ::Time) : Array(::Troupe::IdempotencyRecord)
 
     private def assert_fencing(actor_id : ::Troupe::ActorId, epoch : UInt64) : Nil
       current = @ownership.current(actor_id)
@@ -59,6 +64,7 @@ module Troupe
   # Memory Provider：Rehearsal/单机用。模拟 CAS 与 fencing，真实接管语义在 M3 由共享 Provider 验证。
   class MemoryPropStore < ::Troupe::PropStore
     @records = Hash(::Troupe::ActorId, ::Troupe::PropRecord).new
+    @journals = Hash(::Troupe::ActorId, Hash(String, ::Troupe::IdempotencyRecord)).new
     @mutex = Mutex.new
 
     def cross_node_safe? : Bool
@@ -81,7 +87,8 @@ module Troupe
       end
     end
 
-    def write(actor_id : ::Troupe::ActorId, expected_revision : UInt64, schema_version : Int32, data : String, epoch : UInt64) : ::Troupe::PropRecord
+    def write(actor_id : ::Troupe::ActorId, expected_revision : UInt64, schema_version : Int32, data : String,
+              epoch : UInt64, idempotency : Array(::Troupe::IdempotencyRecord) = [] of ::Troupe::IdempotencyRecord) : ::Troupe::PropRecord
       @mutex.synchronize do
         record = @records[actor_id]?
         unless record
@@ -95,7 +102,17 @@ module Troupe
         end
         updated = PropRecord.new(revision: record.revision + 1, schema_version: schema_version, data: data, epoch: epoch)
         @records[actor_id] = updated
+        journal = @journals[actor_id] ||= Hash(String, ::Troupe::IdempotencyRecord).new
+        idempotency.each { |entry| journal[entry.key] = entry }
         updated
+      end
+    end
+
+    def idempotency(actor_id : ::Troupe::ActorId, now : ::Time) : Array(::Troupe::IdempotencyRecord)
+      @mutex.synchronize do
+        journal = @journals[actor_id]?
+        return [] of ::Troupe::IdempotencyRecord unless journal
+        journal.values.select { |entry| entry.expires_at > now.to_unix }
       end
     end
   end

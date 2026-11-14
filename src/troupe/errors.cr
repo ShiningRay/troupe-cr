@@ -63,6 +63,9 @@ module Troupe
   # 执行结果未知（超时/连接断开/对端停机）：勿假定失败，按幂等键重试。
   class UnknownOutcomeError < Error; end
 
+  # 幂等键冲突：同键不同参数指纹（docs/persistence.md 失败语义）。
+  class IdempotencyConflictError < Error; end
+
   # 调用了未注册的角色。
   class UnknownRoleError < Error; end
 

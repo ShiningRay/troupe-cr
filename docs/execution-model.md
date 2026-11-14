@@ -27,6 +27,8 @@ Fiber 只提供轻量调度，不提供强制隔离。阻塞 C 扩展、CPU 密�
 - 排队过期：不执行、零副作用。
 - 执行中超时：调用方停止等待，结果未知；旧 strict Turn 仍占串行通道直到 settle。
 - 协作取消经 CallContext 传递；Actor 内 I/O 与互调需响应，框架不能声称强制停止外部 C 调用。
+  实现（M2）：`CallFuture#cancel` 置位 `CallContext#cancel_requested?`，Turn 自行决定何时收束；
+  不响应信号的 Turn 完整执行，取消不改变副作用语义。
 - 时钟可注入，Rehearsal 使用虚拟时间/确定性调度，避免依赖 sleep 的脆弱测试。
 
 ## Props 一致性

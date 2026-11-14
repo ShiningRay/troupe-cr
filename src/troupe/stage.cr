@@ -6,7 +6,8 @@ module Troupe
     max_activations : Int32 = 1024,
     default_call_deadline : ::Time::Span = 30.seconds,
     queue_overhead_bytes : Int32 = 256,
-    idle_timeout : ::Time::Span? = nil
+    idle_timeout : ::Time::Span? = nil,
+    idempotency_retention : ::Time::Span = 7.days
 
   # Stage：应用内运行时。显式注册 manifest；call 校验角色/方法白名单后
   # 排入有界 CallBoard，激活数受 max_activations 限制（M1 中 slot≈activation）。
@@ -83,7 +84,7 @@ module Troupe
         now = @clock.now
         deadline_at = now + (deadline || @config.default_call_deadline)
         bytes = method.bytesize + args.to_json.bytesize + @config.queue_overhead_bytes
-        request = TurnRequest.new(@call_seq, method, args, deadline_at, Channel(CallReply).new(1), bytes)
+        request = TurnRequest.new(@call_seq, method, args, deadline_at, Channel(CallReply).new(1), bytes, CancelSignal.new)
         slot = @slots[actor_id]?
         unless slot
           slot = ActorSlot.new(actor_id, manifest, @store, @ownership, @clock, @config, @mode, ->(e : ::Troupe::Event) { emit(e) })

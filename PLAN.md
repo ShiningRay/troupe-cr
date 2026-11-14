@@ -25,7 +25,7 @@
 ## M2：本地持久化、观测和 API 硬化
 
 - [x] 选择开发用本地 Provider（优先 SQLite），原子 CAS 和重开恢复；说明不能跨节点恢复。（SQLitePropStore/SQLiteOwnershipStore，2026-11-14；CAS/fencing 均为单条 SQL 原子语句，`cross_node_safe? = false` 显式声明能力，Windows/MSYS2 与 CI ubuntu 均验证）
-- [ ] 完善 UnknownOutcome、幂等请求记录、迁移、取消和 backpressure 语义。
+- [x] 完善 UnknownOutcome、幂等请求记录、迁移、取消和 backpressure 语义。（2026-11-14：幂等记录与 Props 单事务原子提交、同键同指纹重放/不同指纹拒绝、失败重放、保留期过期；协作取消 `CallContext#cancel_requested?`/`CallFuture#cancel` 不可强行终止；UnknownOutcome 纤维模式证明（超时后原 Turn 占用通道至 settle、效果提交、无自动重试）；backpressure settle 后预算释放可重试；SQLite 重开迁移成功/失败不写）
 - [ ] 结构化 lifecycle/call metrics、Trace 事件、W3C context；OTel 适配保持可选。
 - [ ] 类型安全 Agent/宏 manifest、参数校验、公开 API 文档和 minimal Cart 示例。
 - [ ] 基准：激活吞吐、KB/Actor、热点/分散调用、CPU 阻塞、队列饱和；不与其他语言异口径比较。

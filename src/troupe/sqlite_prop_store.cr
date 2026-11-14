@@ -32,11 +32,11 @@ module Troupe
     end
   end
 
-  # SQLite 开发 Provider（PLAN M2 首项，docs/persistence.md Provider 层级）：
+  # SQLite 开发 Provider（PLAN M2，docs/persistence.md Provider 层级）：
   # - 进程/单机持久；**不能跨节点恢复**（cross_node_safe? = false），接管/双活语义必须由 M3
   #   的 PostgreSQL 等 cross_node_safe Provider 证明。
-  # - create 为带所有权守卫的原子 INSERT；write 为单条 UPDATE（expectedRevision + epoch
-  #   都在 WHERE 内），无应用层先读后写。
+  # - create 为带所有权守卫的原子 INSERT；write 在单事务内完成 Props CAS + 幂等记录
+  #   原子提交（任一失败整体回滚）；无应用层先读后写。
   # - WAL 模式 + busy_timeout；失败后按当前行状态诊断并抛出精确错误。
   class SQLitePropStore < ::Troupe::PropStore
     @db : ::DB::Database
@@ -77,21 +77,51 @@ module Troupe
           "WHERE (SELECT epoch FROM troupe_ownership WHERE actor_id = ?) = ?",
           actor_id.to_s, schema_version.to_i64, data, epoch.to_i64, actor_id.to_s, epoch.to_i64
         )
-        diagnose(actor_id, epoch, creating: true) if result.rows_affected == 0
+        diagnose(@db, actor_id, epoch, creating: true) if result.rows_affected == 0
         read_unlocked(actor_id).not_nil!
       end
     end
 
-    def write(actor_id : ::Troupe::ActorId, expected_revision : UInt64, schema_version : Int32, data : String, epoch : UInt64) : ::Troupe::PropRecord
+    # Props CAS + 幂等记录单事务原子提交（docs/persistence.md 失败语义）。
+    def write(actor_id : ::Troupe::ActorId, expected_revision : UInt64, schema_version : Int32, data : String,
+              epoch : UInt64, idempotency : Array(::Troupe::IdempotencyRecord) = [] of ::Troupe::IdempotencyRecord) : ::Troupe::PropRecord
       @mutex.synchronize do
-        result = @db.exec(
-          "UPDATE troupe_props SET revision = revision + 1, schema_version = ?, data = ?, epoch = ? " \
-          "WHERE actor_id = ? AND revision = ? " \
-          "AND (SELECT epoch FROM troupe_ownership WHERE actor_id = ?) = ?",
-          schema_version.to_i64, data, epoch.to_i64, actor_id.to_s, expected_revision.to_i64, actor_id.to_s, epoch.to_i64
-        )
-        diagnose(actor_id, epoch, creating: false, expected_revision: expected_revision) if result.rows_affected == 0
+        @db.transaction do |tx|
+          conn = tx.connection
+          result = conn.exec(
+            "UPDATE troupe_props SET revision = revision + 1, schema_version = ?, data = ?, epoch = ? " \
+            "WHERE actor_id = ? AND revision = ? " \
+            "AND (SELECT epoch FROM troupe_ownership WHERE actor_id = ?) = ?",
+            schema_version.to_i64, data, epoch.to_i64, actor_id.to_s, expected_revision.to_i64, actor_id.to_s, epoch.to_i64
+          )
+          diagnose(conn, actor_id, epoch, creating: false, expected_revision: expected_revision) if result.rows_affected == 0
+          idempotency.each do |entry|
+            conn.exec(IDEMPOTENCY_UPSERT, actor_id.to_s, entry.key, entry.fingerprint,
+              entry.ok ? 1_i64 : 0_i64, entry.value, entry.error_class, entry.error_message, entry.expires_at)
+          end
+          conn.exec("DELETE FROM troupe_idempotency WHERE expires_at <= strftime('%s','now')")
+        end
         read_unlocked(actor_id).not_nil!
+      end
+    end
+
+    def idempotency(actor_id : ::Troupe::ActorId, now : ::Time) : Array(::Troupe::IdempotencyRecord)
+      @mutex.synchronize do
+        @db.query_all(
+          "SELECT key, fingerprint, ok, value, error_class, error_message, expires_at " \
+          "FROM troupe_idempotency WHERE actor_id = ? AND expires_at > ?",
+          actor_id.to_s, now.to_unix
+        ) do |rs|
+          key = rs.read(String)
+          fingerprint = rs.read(String)
+          ok = rs.read(Int64) != 0
+          value = rs.read(String?)
+          error_class = rs.read(String?)
+          error_message = rs.read(String?)
+          expires_at = rs.read(Int64)
+          IdempotencyRecord.new(key: key, fingerprint: fingerprint, ok: ok, expires_at: expires_at,
+            value: value, error_class: error_class, error_message: error_message)
+        end
       end
     end
 
@@ -100,7 +130,21 @@ module Troupe
       "CREATE TABLE IF NOT EXISTS troupe_props " \
       "(actor_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, schema_version INTEGER NOT NULL, " \
       "data TEXT NOT NULL, epoch INTEGER NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS troupe_idempotency " \
+      "(actor_id TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, ok INTEGER NOT NULL, " \
+      "value TEXT, error_class TEXT, error_message TEXT, expires_at INTEGER NOT NULL, " \
+      "PRIMARY KEY (actor_id, key))",
     ]
+
+    private IDEMPOTENCY_UPSERT = <<-SQL
+      INSERT INTO troupe_idempotency
+        (actor_id, key, fingerprint, ok, value, error_class, error_message, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(actor_id, key) DO UPDATE SET
+        fingerprint = excluded.fingerprint, ok = excluded.ok, value = excluded.value,
+        error_class = excluded.error_class, error_message = excluded.error_message,
+        expires_at = excluded.expires_at
+    SQL
 
     private def read_unlocked(actor_id : ::Troupe::ActorId) : ::Troupe::PropRecord?
       @db.query_one?(
@@ -113,14 +157,14 @@ module Troupe
     end
 
     # 0 行受影响后的精确诊断：fencing 优先于 CAS（docs/persistence.md）。
-    private def diagnose(actor_id : ::Troupe::ActorId, epoch : UInt64,
+    private def diagnose(q : ::DB::Database | ::DB::Connection, actor_id : ::Troupe::ActorId, epoch : UInt64,
                          creating : Bool, expected_revision : UInt64 = 0_u64) : NoReturn
-      current = @db.scalar("SELECT epoch FROM troupe_ownership WHERE actor_id = ?", actor_id.to_s)
+      current = q.scalar("SELECT epoch FROM troupe_ownership WHERE actor_id = ?", actor_id.to_s)
       if current.nil? || current.as(Int64) != epoch.to_i64
         shown = current.nil? ? "无所有权记录" : "epoch #{current.as(Int64)}"
         raise CallRejectedError.new("epoch #{epoch} 未取得或已被取代（当前 #{shown}），拒绝写 Actor #{actor_id}", :ownership, false)
       end
-      record = @db.query_one?("SELECT revision FROM troupe_props WHERE actor_id = ?", actor_id.to_s) { |rs| rs.read(Int64) }
+      record = q.query_one?("SELECT revision FROM troupe_props WHERE actor_id = ?", actor_id.to_s) { |rs| rs.read(Int64) }
       if record.nil?
         raise ConflictError.new("Actor #{actor_id} 的 Props 不存在", :revision)
       end

@@ -186,7 +186,9 @@ module Troupe
         record = migrate_if_needed(record, epoch)
       end
       props = @manifest.parse_final(record.data)
-      ctx = ActivationContext.new(@store, @manifest, @clock, epoch, record.revision)
+      journal = Hash(String, ::Troupe::IdempotencyRecord).new
+      @store.idempotency(@actor_id, @clock.now).each { |entry| journal[entry.key] = entry }
+      ctx = ActivationContext.new(@store, @manifest, @clock, epoch, record.revision, journal, @config.idempotency_retention)
       actor = @manifest.build_actor(@actor_id, props, ctx)
       actor.on_stage
       {actor, ctx}
@@ -227,7 +229,7 @@ module Troupe
       end
       @emit.call(Event.new(EventType::TurnStarted, @actor_id, @clock.now, request.method, nil))
       begin
-        call_ctx = CallContext.new(request.call_id, actor_id, request.method, request.deadline, @clock)
+        call_ctx = CallContext.new(request.call_id, actor_id, request.method, request.deadline, @clock, request.cancel)
         value = @manifest.invoke_turn(actor, call_ctx, request.method, request.args)
         settled = @clock.now
         @mutex.synchronize do

@@ -28,6 +28,9 @@ production 必须拒绝不满足共享/fencing 合同的 Provider，而不是只
 实现状态（M2）：`PropStore#cross_node_safe?` 显式声明 Provider 能力——Memory/SQLite 均为 false
 （仅进程/单机持久，不能跨节点恢复）；SQLite Provider 的 CAS 与 fencing 均在单条 SQL 语句内原子完成，
 `write` 的 expectedRevision 与 epoch 都在 UPDATE 的 WHERE 中，无应用层先读后写。
+幂等请求记录已实现：`ActorBase#idempotent(key, fingerprint)` 同键同指纹重放首次结果/重抛首次错误、
+不同指纹 `IdempotencyConflictError`、保留期过期视为新操作；记录与 Props 在同一原子提交内落盘
+（Memory 同锁、SQLite 单事务回滚验证），激活时装载未过期记录，重开（SQLite）后重放仍有效。
 
 ## 失败语义
 

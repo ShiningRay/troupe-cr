@@ -2,11 +2,10 @@
 # 所有类位于全局命名空间，spec 间通过 class 级日志隔离测试状态。
 class CounterProps
   include JSON::Serializable
+  property count : Int32 = 0
 
   def initialize
   end
-
-  property count : Int32 = 0
 end
 
 class CounterActor < Troupe::Actor(CounterProps)
@@ -40,11 +39,10 @@ end
 
 class SlowProps
   include JSON::Serializable
+  property count : Int32 = 0
 
   def initialize
   end
-
-  property count : Int32 = 0
 end
 
 class SlowActor < Troupe::Actor(SlowProps)
@@ -52,11 +50,10 @@ end
 
 class FlakyProps
   include JSON::Serializable
+  property count : Int32 = 0
 
   def initialize
   end
-
-  property count : Int32 = 0
 end
 
 class FlakyActor < Troupe::Actor(FlakyProps)
@@ -77,32 +74,29 @@ end
 
 class CartPropsV1
   include JSON::Serializable
+  property items : Array(String) = [] of String
 
   def initialize
   end
-
-  property items : Array(String) = [] of String
 end
 
 class CartPropsV2
   include JSON::Serializable
+  property items : Array(String) = [] of String
+  property gift_wrap : Bool = false
 
   def initialize
   end
-
-  property items : Array(String) = [] of String
-  property gift_wrap : Bool = false
 end
 
 class CartPropsV3
   include JSON::Serializable
-
-  def initialize
-  end
-
   property items : Array(String) = [] of String
   property gift_wrap : Bool = false
   property currency : String = "USD"
+
+  def initialize
+  end
 end
 
 class CartActor < Troupe::Actor(CartPropsV3)
@@ -110,6 +104,58 @@ class CartActor < Troupe::Actor(CartPropsV3)
     props.items << item
     save
     props.items.size
+  end
+end
+
+class IdemProps
+  include JSON::Serializable
+  property charged : Int32 = 0
+
+  def initialize
+  end
+end
+
+class IdemActor < Troupe::Actor(IdemProps)
+end
+
+class LoopProps
+  include JSON::Serializable
+  property count : Int32 = 0
+
+  def initialize
+  end
+end
+
+class LoopActor < Troupe::Actor(LoopProps)
+end
+
+class GateProps
+  include JSON::Serializable
+  property count : Int32 = 0
+
+  def initialize
+  end
+end
+
+class GateActor < Troupe::Actor(GateProps)
+  @@gate : Channel(Nil) = Channel(Nil).new
+  @@executions = 0
+
+  def self.gate
+    @@gate
+  end
+
+  def self.executions
+    @@executions
+  end
+
+  def self.record_execution
+    @@executions += 1
+  end
+
+  def self.reset!
+    @@gate = Channel(Nil).new
+    @@executions = 0
   end
 end
 
@@ -191,5 +237,45 @@ module TroupeFixtures
     v1 = CartPropsV1.new
     v1.items = items
     rehearsal.store.create(id, 1, v1.to_json, epoch)
+  end
+
+  # 幂等扣款：args 全量 JSON 作为参数指纹；fail=true 注入业务失败。
+  def register_idem(stage : Troupe::Stage, role : String = "order") : Nil
+    stage.register(Troupe::Manifest(IdemProps).define(role, IdemActor) do |m|
+      m.schema_version 1
+      m.initial { IdemProps.new }
+      m.turn "charge", IdemActor do |actor, ctx, args|
+        actor.idempotent(args["order_id"].as_s, args.to_json) do
+          if args["fail"]? && args["fail"].as_bool
+            raise Troupe::SerializationError.new("注入扣款失败")
+          end
+          actor.props.charged += args["amount"].as_i
+          JSON::Any.new(actor.props.charged.to_i64)
+        end
+      end
+    end)
+  end
+
+  # 协作取消：steps 轮询 cancel_requested?；full 不观察信号。
+  def register_loop(stage : Troupe::Stage, role : String = "loop") : Nil
+    stage.register(Troupe::Manifest(LoopProps).define(role, LoopActor) do |m|
+      m.schema_version 1
+      m.initial { LoopProps.new }
+      m.turn "steps", LoopActor do |actor, ctx, args|
+        done = 0
+        while done < args["max"].as_i
+          break if ctx.cancel_requested?
+          done += 1
+        end
+        actor.props.count = done
+        actor.save
+        JSON::Any.new(done.to_i64)
+      end
+      m.turn "full", LoopActor do |actor, ctx, args|
+        actor.props.count = args["max"].as_i
+        actor.save
+        JSON::Any.new(actor.props.count.to_i64)
+      end
+    end)
   end
 end

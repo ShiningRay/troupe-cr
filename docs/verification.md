@@ -121,3 +121,41 @@ CI（GitHub Actions `Checks`，ubuntu-latest，Crystal 1.22）：新增 `apt-get
 - SQLite Provider 只承诺进程/单机持久：**不承诺节点丢失或跨机恢复**（persistence.md Provider 层级）；production 接管语义（多节点 fencing/双活防护）待 M3 PostgreSQL 证据，`cross_node_safe? = false` 是显式能力声明。
 - 未验证多进程同时写同一 SQLite 文件的锁竞争行为（busy_timeout 5000ms 已设，但未做多进程反例）。
 - 未做性能基准（M2 后续项）。
+
+## M2（第二项）：UnknownOutcome / 幂等 / 取消 / 迁移 / backpressure 语义硬化（2026-11-14）
+
+### 命令与结果
+
+```sh
+crystal spec
+# 57 examples, 0 failures, 0 errors, 0 pending（新增 14 例）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| 幂等重放 | 同键同指纹：第二次调用重放首次结果，副作用不重复执行（charged 保持 5） |
+| 幂等指纹冲突 | 同键不同指纹 → IdempotencyConflictError，状态不变 |
+| 幂等失败记录 | 首次失败（注入异常）→ 记录 ok=false；重放按记录重抛（附原始错误类别）；Props 保持未提交 |
+| 幂等保留期 | retention 过期后同键视为新操作（重新执行；激活装载与 Turn 内查找均做时效判定） |
+| 幂等原子提交（Memory） | write 失败（revision 冲突）→ 幂等记录不落盘；成功则记录与 Props 同锁生效 |
+| 幂等原子提交（SQLite） | 单事务：revision 冲突 → 整体回滚，记录不存在 |
+| 幂等持久化 | SQLite 重开后同键同指纹仍重放（troupe_idempotency 表持久） |
+| 协作取消 | Turn 轮询 `ctx.cancel_requested?` 提前收束并提交部分状态（steps → 0） |
+| 取消不可强杀 | 不观察信号的 Turn 被 cancel 后仍完整执行并提交（full → 7）；cancel 仅置位标志 |
+| cancel 幂等 | 已 settle（含 await 已取回复）的 future 上 cancel 返回 false（reply_cache 语义修复） |
+| 背压预算释放 | 队列深度达上限拒绝（retryable）→ pump settle → 重试成功（count 3） |
+| UnknownOutcome（fiber） | Turn 阻塞超 deadline → 调用方 CallTimeout(:executing)；放行后原 Turn settle、效果提交（结果未知 ≠ 失败）；执行计数 = 1（框架不自动重试）；下一 Turn 严格在其后执行 |
+| 迁移 × 重开（SQLite） | 存量 v1 重开激活逐级迁移 v1→v2→v3 并持久化（revision 3）；迁移步抛错 → ActivationError、重开后 store 保持 v1/revision 1（零写入） |
+
+### 未验证边界（不宣称）
+
+- 取消为协作式：不响应信号的 Turn 无法被框架终止（DESIGN 边界，非缺陷）。
+- UnknownOutcomeError 本身留待 M3 transport（断连/对端停机）产生；本地未知结果由 CallTimeout(:executing) 表达。
+- 幂等重放错误重建为 `::Exception`（保留原类别名与消息，不重建原类型）——与 troupejs 行为一致。
+- 未验证多线程运行时（preview_mt）下 CancelSignal 布尔标志的可见性；当前单线程事件循环内无竞争。

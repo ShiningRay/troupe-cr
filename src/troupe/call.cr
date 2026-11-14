@@ -1,4 +1,18 @@
 module Troupe
+  # 协作取消信号（DESIGN §5 时间与取消）：仅置位标志，Turn 是否/何时响应由 Actor 代码决定。
+  # 框架不会强行终止 Turn；取消不改变副作用语义（settle 后正常回复）。
+  class CancelSignal
+    @requested = false
+
+    def request : Nil
+      @requested = true
+    end
+
+    def requested? : Bool
+      @requested
+    end
+  end
+
   # 排入 CallBoard 的一次调用请求。reply 为容量 1 的通道：每个请求恰好收到一次回复。
   class TurnRequest
     getter call_id : UInt64
@@ -7,8 +21,10 @@ module Troupe
     getter deadline : ::Time
     getter reply : Channel(::Troupe::CallReply)
     getter bytes : Int32
+    getter cancel : ::Troupe::CancelSignal
 
-    def initialize(@call_id : UInt64, @method : String, @args : ::JSON::Any, @deadline : ::Time, @reply : Channel(::Troupe::CallReply), @bytes : Int32)
+    def initialize(@call_id : UInt64, @method : String, @args : ::JSON::Any, @deadline : ::Time,
+                   @reply : Channel(::Troupe::CallReply), @bytes : Int32, @cancel : ::Troupe::CancelSignal)
     end
   end
 
@@ -32,22 +48,33 @@ module Troupe
   # 调用方持有的 Future。
   # Fiber 模式：await 阻塞至回复或 deadline；
   # Manual 模式（Rehearsal）：pump 同步执行后回复已在通道内，await 不需要真实等待。
+  # 回复通道容量 1 且 receive 会取走值：Future 以 reply_cache 缓存已取回复，
+  # 使 settled?/cancel 在 await 之后仍语义正确。
   class CallFuture
     @request : ::Troupe::TurnRequest
     @clock : ::Troupe::Clock
     @manual : Bool
+    @reply_cache : ::Troupe::CallReply? = nil
 
     def initialize(@request : ::Troupe::TurnRequest, @clock : ::Troupe::Clock, @manual : Bool)
     end
 
     # 回复是否已抵达（无论成功失败）。
     def settled? : Bool
-      !try_receive.nil?
+      !pending_reply.nil?
+    end
+
+    # 请求协作取消：仅置位 CancelSignal，Turn 通过 CallContext#cancel_requested? 观察并自行决定
+    # 何时/如何收束（可提前 settle 提交部分状态）。不可强行终止；已 settle 的调用无效果。
+    def cancel : Bool
+      return false if settled?
+      @request.cancel.request
+      true
     end
 
     # 等待结果；错误原样抛出（含 Troupe::Error 与业务异常）。
     def await : ::JSON::Any
-      if reply = try_receive
+      if reply = pending_reply
         return settle(reply)
       end
       now = @clock.now
@@ -57,13 +84,13 @@ module Troupe
       end
       if @manual
         # Rehearsal：等待 pump 发回回复（测试先 pump 再 await；同 Fiber 未 pump 将阻塞）。
-        settle(@request.reply.receive)
+        cache_and_settle(@request.reply.receive)
       else
         remaining = @request.deadline - now
         span = remaining < Time::Span.zero ? Time::Span.zero : remaining
         select
         when reply = @request.reply.receive
-          settle(reply)
+          cache_and_settle(reply)
         when timeout(span)
           raise CallTimeoutError.new("等待回复超过 deadline：该 Turn 可能已开始执行，结果未知（#{method}）", :executing)
         end
@@ -72,6 +99,20 @@ module Troupe
 
     private def method : String
       @request.method
+    end
+
+    private def pending_reply : ::Troupe::CallReply?
+      return @reply_cache if @reply_cache
+      if reply = try_receive
+        @reply_cache = reply
+        return reply
+      end
+      nil
+    end
+
+    private def cache_and_settle(reply : ::Troupe::CallReply) : ::JSON::Any
+      @reply_cache = reply
+      settle(reply)
     end
 
     private def try_receive : ::Troupe::CallReply?
