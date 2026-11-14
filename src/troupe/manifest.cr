@@ -48,6 +48,9 @@ module Troupe
 
     abstract def serialize_props(props : ::JSON::Serializable) : String
 
+    # 排队前参数校验：缺参/类型不符抛 InvalidArgumentError；无 schema 的手动 turn 不校验。
+    abstract def validate_args(method : ::String, args : ::JSON::Any) : Nil
+
     abstract def validate! : Nil
   end
 
@@ -59,6 +62,7 @@ module Troupe
     @initial : Proc(P)? = nil
     @migrations = [] of ::Troupe::MigrationStepBase
     @turns = Hash(String, Proc(::Troupe::Actor(P), ::Troupe::CallContext, ::JSON::Any, ::JSON::Any)).new
+    @turn_schemas = Hash(String, Hash(::String, ::String)).new
     @factory : Proc(::Troupe::ActorId, P, ::Troupe::ActivationContext, ::Troupe::ActorBase)
 
     # 由具体 Actor 类派生工厂：闭包捕获具体类（forall A），
@@ -108,6 +112,18 @@ module Troupe
       }
     end
 
+    # 注册带参数 schema 的 Turn（troupe_manifest 宏使用；语义与 turn 完全一致）。
+    def turn_with_schema(actor_type : A.class, name : String, schema : Hash(::String, ::String),
+                         &block : A, ::Troupe::CallContext, ::JSON::Any -> ::JSON::Any) forall A
+      if RESERVED_TURNS.includes?(name) || @turns.has_key?(name)
+        raise ArgumentError.new("turn #{name.inspect} 与保留名或已注册方法冲突（角色 #{role}）")
+      end
+      @turn_schemas[name] = schema
+      @turns[name] = ->(actor : ::Troupe::Actor(P), ctx : ::Troupe::CallContext, args : ::JSON::Any) {
+        block.call(actor.as(A), ctx, args)
+      }
+    end
+
     def turn_names : Array(String)
       @turns.keys
     end
@@ -149,6 +165,43 @@ module Troupe
 
     def serialize_props(props : ::JSON::Serializable) : String
       props.to_json
+    end
+
+    def validate_args(method : ::String, args : ::JSON::Any) : Nil
+      schema = @turn_schemas[method]?
+      return unless schema
+      unless args.as_h?
+        raise InvalidArgumentError.new("方法 #{method.inspect} 的参数必须是 JSON 对象（角色 #{role}）")
+      end
+      obj = args.as_h
+      schema.each do |param, type|
+        value = obj[param]?
+        if value.nil? || value.raw.nil?
+          unless type.ends_with?("?")
+            raise InvalidArgumentError.new("缺少参数 #{param.inspect}（#{type}，角色 #{role}）")
+          end
+        else
+          base = type.ends_with?("?") ? type[0...-1] : type
+          unless arg_type_matches?(value.raw, base)
+            raise InvalidArgumentError.new("参数 #{param.inspect} 类型不符：期望 #{type}（角色 #{role}）")
+          end
+        end
+      end
+    end
+
+    private def arg_type_matches?(raw, base : String) : Bool
+      case base
+      when "Int32", "Int64"
+        raw.is_a?(Int64)
+      when "String"
+        raw.is_a?(String)
+      when "Bool"
+        raw.is_a?(Bool)
+      when "Float64"
+        raw.is_a?(Float64) || raw.is_a?(Int64) # JSON 无整型/浮点区分强制：整数可作浮点
+      else
+        true # JSON::Any 或未识别类型不限制
+      end
     end
 
     def validate! : Nil

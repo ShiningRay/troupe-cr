@@ -18,3 +18,5 @@ jobs:
       - run: crystal spec
       - run: crystal tool format --check src spec
       - run: crystal build src/troupe.cr --no-codegen
+      - run: crystal run examples/cart.cr > /dev/null # Minimal Cart 示例冒烟
+      - run: crystal docs -o .crystal/api-docs # API 文档可生成

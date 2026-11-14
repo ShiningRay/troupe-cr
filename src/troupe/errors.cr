@@ -80,4 +80,7 @@ module Troupe
 
   # 激活失败：加载、迁移或 on_stage 抛错（DESIGN §5.2 状态机）。
   class ActivationError < Error; end
+
+  # 请求参数校验失败（缺参/类型不符）：排队前拒绝，不可重试原样重发。
+  class InvalidArgumentError < Error; end
 end

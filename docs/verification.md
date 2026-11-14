@@ -191,3 +191,40 @@ crystal build src/troupe.cr --no-codegen
 - Trace 总线无环形缓冲/采样/过滤（troupejs 有，M2 Crystal 仅回调钩子；量级需求出现后再加）。
 - 调用链为显式传父：宏生成的类型安全 Agent（M2 第四项）与跨 Stage transport（M3）承担自动化传播。
 - 未对真实 OTel SDK 导出做集成验证（适配器保持可选，核心契约即钩子）。
+
+## M2（第四项）：类型安全 Agent / 宏 manifest / 参数校验 / Cart 示例（2026-11-14）
+
+### 命令与结果
+
+```sh
+crystal spec
+# 70 examples, 0 failures, 0 errors, 0 pending（新增 5 例）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+crystal run examples/cart.cr
+# 示例冒烟通过（typed 调用、trace、参数校验拒绝、白名单拒绝、metrics）
+crystal docs -o .crystal/api-docs
+# API 文档可生成（公开 API 均有 docstring）
+```
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| 宏 manifest 等价性 | `troupe_manifest` 生成的 Manifest 与手写 define/turn 行为一致（typed 与 raw JSON 双路径同结果）；重复注册 RoleConflictError |
+| 类型安全代理 | 编译期校验参数/返回类型；可选参数缺省（qty 缺省→1）；返回值按声明类型解包 |
+| 参数校验（排队前） | 缺参 → InvalidArgumentError；类型不符 → InvalidArgumentError；非对象参数 → InvalidArgumentError；拒绝后 store 无记录（零副作用、不占用队列） |
+| 可选参数 | 缺省通过；出现但类型不符拒绝 |
+| 校验顺序 | 白名单先于参数校验（生命周期方法 → CallRejectedError(:whitelist)） |
+| 指标 | 拒绝计入 rejections（按角色） |
+| trace 透传 | typed agent 传 traceparent → TraceEvent.parent_traceparent = 传入值、trace-id 继承 |
+| 宏拒绝编译期 | 不支持的参数/返回类型、缺 returns、非 turn 声明均在宏展开时报错（编译期反例，非运行时） |
+
+### 未验证边界（不宣称）
+
+- 宏支持的参数/返回类型限于 Int32/Int64/String/Bool/Float64/JSON::Any 及 `T?` 可选形（数组/嵌套结构走 JSON::Any）；Schema 演进随公共协议 ADR。
+- 宏生成的 manifest 不覆盖迁移声明（迁移仍走手写 `m.migrate`，与 schemaVersion 逐级迁移语义一致）。
+- 参数校验为 presence/type 级；深度 schema 校验（范围、自定义谓词）留待需要时。
+- `crystal docs` 未入 CI 门禁（本机验证可生成；CI 仅示例冒烟）。

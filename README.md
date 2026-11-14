@@ -63,6 +63,28 @@ result = Troupe::Agent.new(stage).call!(id, "add", JSON.parse(%({"item": "pear"}
 
 Turn 闭包走 JSON 参数/结果边界；`save` 以 revision CAS + epoch fencing 显式提交。测试请使用 `Troupe::Rehearsal`（固定 namespace、Memory Provider、虚拟时钟、pump 确定性调度）。
 
+## 类型安全 Agent（宏 manifest）
+
+```crystal
+class CartActor < Troupe::Actor(CartProps)
+  troupe_manifest "cart", schema_version: 1 do
+    turn add_item, {item: String}, returns: Int32
+  end
+
+  def add_item(item : String) : Int32
+    props.items << item
+    save
+    props.items.size
+  end
+end
+
+stage.register(CartActor.troupe_manifest)          # 宏生成 manifest（含参数 schema）
+cart = CartActor::Agent.new(stage)                 # 类型安全代理
+cart.add_item(id, "pear")                          # 编译期类型安全；缺参/类型不符排队前拒绝
+```
+
+完整示例见 [examples/cart.cr](examples/cart.cr)（`crystal run examples/cart.cr`）。
+
 ## 本地持久化（M2，开发用）
 
 ```crystal

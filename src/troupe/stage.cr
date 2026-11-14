@@ -112,6 +112,12 @@ module Troupe
           emit(Event.new(EventType::CallRejected, actor_id, @clock.now, method, "whitelist"))
           raise CallRejectedError.new("方法 #{method.inspect} 不在角色 #{manifest.role} 的白名单（生命周期/内部方法不可 RPC）", :whitelist, false)
         end
+        begin
+          manifest.validate_args(method, args)
+        rescue e : InvalidArgumentError
+          emit(Event.new(EventType::CallRejected, actor_id, @clock.now, method, "invalid_argument"))
+          raise e
+        end
         if @slots.size >= @config.max_activations
           raise CallRejectedError.new("Stage activation 数 #{@slots.size} 达上限 #{@config.max_activations}", :backpressure, true)
         end

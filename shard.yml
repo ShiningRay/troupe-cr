@@ -1,5 +1,5 @@
 name: troupe
-version: 0.5.0-dev.0
+version: 0.6.0-dev.0
 description: Troupe Virtual Actor framework for Crystal — M1 core + M2 SQLite local persistence
 license: MIT
 crystal: ">= 1.22"
