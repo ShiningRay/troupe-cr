@@ -27,6 +27,7 @@ module Troupe
     @config : ::Troupe::StageConfig
     @mode : ::Troupe::SchedulerMode
     @emit : Proc(::Troupe::Event, Nil)
+    @emit_trace : Proc(::Troupe::TraceEvent, Nil)
     @board : ::Troupe::CallBoard
     @mutex = Mutex.new
     @wakeup = Channel(Nil).new(1)
@@ -42,7 +43,8 @@ module Troupe
     def initialize(@actor_id : ::Troupe::ActorId, @manifest : ::Troupe::ManifestBase,
                    @store : ::Troupe::PropStore, @ownership : ::Troupe::OwnershipStore,
                    @clock : ::Troupe::Clock, @config : ::Troupe::StageConfig,
-                   @mode : ::Troupe::SchedulerMode, @emit : Proc(::Troupe::Event, Nil))
+                   @mode : ::Troupe::SchedulerMode, @emit : Proc(::Troupe::Event, Nil),
+                   @emit_trace : Proc(::Troupe::TraceEvent, Nil))
       @board = CallBoard.new(@config.max_queue_depth, @config.max_queue_bytes)
       @last_activity = @clock.now
       start_consumer if @mode == SchedulerMode::Fiber
@@ -68,6 +70,7 @@ module Troupe
           @last_activity = @clock.now
           reply_error(expired, CallTimeoutError.new("调用排队超过 deadline，未执行、无副作用（#{expired.method}）", :queued))
           @emit.call(Event.new(EventType::TurnExpired, @actor_id, @clock.now, expired.method, "queued"))
+          emit_trace_expired(expired)
         end
         @executing = true if request
       end
@@ -135,9 +138,16 @@ module Troupe
           @last_activity = @clock.now
           reply_error(expired, CallTimeoutError.new("调用排队超过 deadline，未执行、无副作用（#{expired.method}）", :queued))
           @emit.call(Event.new(EventType::TurnExpired, @actor_id, @clock.now, expired.method, "queued"))
+          emit_trace_expired(expired)
         end
       end
       request
+    end
+
+    private def emit_trace_expired(request : ::Troupe::TurnRequest) : Nil
+      @emit_trace.call(TraceEvent.new(call_id: request.call_id, actor_id: @actor_id, method: request.method,
+        duration: Time::Span.zero, ok: false, outcome: "expired",
+        traceparent: request.traceparent, parent_traceparent: request.parent_traceparent, at: @clock.now))
     end
 
     private def signal : Nil
@@ -227,9 +237,10 @@ module Troupe
         @emit.call(Event.new(EventType::ActivationFailed, @actor_id, @clock.now, request.method, e.message))
         return
       end
-      @emit.call(Event.new(EventType::TurnStarted, @actor_id, @clock.now, request.method, nil))
+      started = @clock.now
+      @emit.call(Event.new(EventType::TurnStarted, @actor_id, started, request.method, nil))
       begin
-        call_ctx = CallContext.new(request.call_id, actor_id, request.method, request.deadline, @clock, request.cancel)
+        call_ctx = CallContext.new(request.call_id, actor_id, request.method, request.deadline, @clock, request.cancel, request.traceparent)
         value = @manifest.invoke_turn(actor, call_ctx, request.method, request.args)
         settled = @clock.now
         @mutex.synchronize do
@@ -237,7 +248,10 @@ module Troupe
           @executing = false
         end
         request.reply.send(CallReply.value(value, settled))
-        @emit.call(Event.new(EventType::TurnEnded, @actor_id, @clock.now, request.method, "ok"))
+        @emit.call(Event.new(EventType::TurnEnded, @actor_id, settled, request.method, "ok"))
+        @emit_trace.call(TraceEvent.new(call_id: request.call_id, actor_id: @actor_id, method: request.method,
+          duration: settled - started, ok: true, outcome: "completed",
+          traceparent: request.traceparent, parent_traceparent: request.parent_traceparent, at: settled))
       rescue e : ::Exception
         settled = @clock.now
         invalidated = invalidating?(e)
@@ -251,9 +265,12 @@ module Troupe
             @state = SlotState::Idle
           end
         end
-        @emit.call(Event.new(EventType::SaveFailed, @actor_id, @clock.now, request.method, e.class.name)) if invalidated
+        @emit.call(Event.new(EventType::SaveFailed, @actor_id, settled, request.method, e.class.name)) if invalidated
         request.reply.send(CallReply.error(e, settled))
-        @emit.call(Event.new(EventType::TurnEnded, @actor_id, @clock.now, request.method, "error"))
+        @emit.call(Event.new(EventType::TurnEnded, @actor_id, settled, request.method, "error"))
+        @emit_trace.call(TraceEvent.new(call_id: request.call_id, actor_id: @actor_id, method: request.method,
+          duration: settled - started, ok: false, outcome: "failed",
+          traceparent: request.traceparent, parent_traceparent: request.parent_traceparent, at: settled))
       end
     end
 

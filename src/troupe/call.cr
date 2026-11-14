@@ -14,6 +14,8 @@ module Troupe
   end
 
   # 排入 CallBoard 的一次调用请求。reply 为容量 1 的通道：每个请求恰好收到一次回复。
+  # traceparent 为本 Turn 自己的 W3C span（Stage 由调用方传入的父上下文派生）；
+  # parent_traceparent 为调用方传入并校验后的上下文（nil 表示新 trace）。
   class TurnRequest
     getter call_id : UInt64
     getter method : String
@@ -22,9 +24,12 @@ module Troupe
     getter reply : Channel(::Troupe::CallReply)
     getter bytes : Int32
     getter cancel : ::Troupe::CancelSignal
+    getter traceparent : String
+    getter parent_traceparent : String?
 
     def initialize(@call_id : UInt64, @method : String, @args : ::JSON::Any, @deadline : ::Time,
-                   @reply : Channel(::Troupe::CallReply), @bytes : Int32, @cancel : ::Troupe::CancelSignal)
+                   @reply : Channel(::Troupe::CallReply), @bytes : Int32, @cancel : ::Troupe::CancelSignal,
+                   @traceparent : String, @parent_traceparent : String?)
     end
   end
 

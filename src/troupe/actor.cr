@@ -83,13 +83,15 @@ module Troupe
 
   # 单个 Turn 的调用上下文。clock 可注入：Rehearsal 中 Turn 体内推进虚拟时钟可确定性模拟耗时。
   # cancel 为协作取消信号（CallFuture#cancel 置位，Turn 自行决定是否/如何响应）。
+  # traceparent 为本 Turn 的 W3C span：Actor 互调时显式作为父传给 stage.call（M2 无隐式传播）。
   record CallContext,
     call_id : UInt64,
     actor_id : ::Troupe::ActorId,
     method : ::String,
     deadline : ::Time,
     clock : ::Troupe::Clock,
-    cancel : ::Troupe::CancelSignal do
+    cancel : ::Troupe::CancelSignal,
+    traceparent : ::String do
     def cancel_requested? : Bool
       cancel.requested?
     end

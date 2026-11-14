@@ -159,3 +159,35 @@ crystal build src/troupe.cr --no-codegen
 - UnknownOutcomeError 本身留待 M3 transport（断连/对端停机）产生；本地未知结果由 CallTimeout(:executing) 表达。
 - 幂等重放错误重建为 `::Exception`（保留原类别名与消息，不重建原类型）——与 troupejs 行为一致。
 - 未验证多线程运行时（preview_mt）下 CancelSignal 布尔标志的可见性；当前单线程事件循环内无竞争。
+
+## M2（第三项）：metrics / Trace 事件 / W3C trace context（2026-11-14）
+
+### 命令与结果
+
+```sh
+crystal spec
+# 65 examples, 0 failures, 0 errors, 0 pending（新增 8 例）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| W3C tracecontext 派生 | new_span 合法；child 继承 trace-id、换 span-id |
+| 非法父降级 | 空/乱串/长度错/非 hex/全零 trace-id/全零 span-id/版本 ff 均拒绝，child_span 静默降级为新根 span（W3C 容错） |
+| 根 span 独立 | 无父的两次调用各自新 trace-id；TraceEvent.parent_traceparent 为 nil |
+| 调用链传播 | Actor 互调显式传 `ctx.traceparent`：leaf 的 parent = root 的 traceparent、同 trace、不同 span（M2 无隐式传播，宏层 M4 再自动化） |
+| metrics 一致性 | activations/turns_started/turns_completed 与真实激活/执行次数一致 |
+| metrics 反例 | 激活失败→activation_failures；业务失败→turns_failed；排队过期→turns_expired；白名单拒绝→rejections（按角色）；fencing 保存失败→save_failures |
+| trace 过期事件 | 过期 Turn 产出 outcome=expired、ok=false、duration=0 |
+| OTel 可选 | 核心零 otel 依赖；`Stage#on_trace` 为桥接钩子（对齐 troupejs onSpan 模式） |
+
+### 未验证边界（不宣称）
+
+- Trace 总线无环形缓冲/采样/过滤（troupejs 有，M2 Crystal 仅回调钩子；量级需求出现后再加）。
+- 调用链为显式传父：宏生成的类型安全 Agent（M2 第四项）与跨 Stage transport（M3）承担自动化传播。
+- 未对真实 OTel SDK 导出做集成验证（适配器保持可选，核心契约即钩子）。

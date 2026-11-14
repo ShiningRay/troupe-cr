@@ -6,14 +6,14 @@ module Troupe
     end
 
     def call(actor_id : ::Troupe::ActorId, method : String, args : ::JSON::Any = ::JSON::Any.new(nil),
-             deadline : ::Time::Span? = nil) : ::Troupe::CallFuture
-      @stage.call(actor_id, method, args, deadline)
+             deadline : ::Time::Span? = nil, traceparent : String? = nil) : ::Troupe::CallFuture
+      @stage.call(actor_id, method, args, deadline, traceparent)
     end
 
     # 阻塞直至结果；错误原样抛出（含 Troupe::Error 与业务异常）。
     def call!(actor_id : ::Troupe::ActorId, method : String, args : ::JSON::Any = ::JSON::Any.new(nil),
-              deadline : ::Time::Span? = nil) : ::JSON::Any
-      call(actor_id, method, args, deadline).await
+              deadline : ::Time::Span? = nil, traceparent : String? = nil) : ::JSON::Any
+      call(actor_id, method, args, deadline, traceparent).await
     end
   end
 end

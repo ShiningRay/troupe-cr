@@ -21,10 +21,13 @@ module Troupe
     @call_seq : UInt64 = 0
     @closed = false
     @event_handler : Proc(::Troupe::Event, Nil)? = nil
+    @trace_handler : Proc(::Troupe::TraceEvent, Nil)? = nil
+    @metrics = StageMetrics.new
 
     getter clock : ::Troupe::Clock
     getter config : ::Troupe::StageConfig
     getter name : String
+    getter metrics : ::Troupe::StageMetrics
 
     def initialize(@clock : ::Troupe::Clock = SystemClock.new, store : ::Troupe::PropStore? = nil,
                    ownership : ::Troupe::OwnershipStore? = nil, @mode : ::Troupe::SchedulerMode = SchedulerMode::Fiber,
@@ -46,9 +49,39 @@ module Troupe
       @event_handler = handler
     end
 
+    # OTel 桥接钩子（可选）：每个 Turn 边界回调；框架自身不依赖 OTel SDK。
+    def on_trace(&handler : ::Troupe::TraceEvent -> Nil) : Nil
+      @trace_handler = handler
+    end
+
+    private def emit_trace(event : ::Troupe::TraceEvent) : Nil
+      if handler = @trace_handler
+        handler.call(event)
+      end
+    end
+
     private def emit(event : ::Troupe::Event) : Nil
+      update_metrics(event)
       if handler = @event_handler
         handler.call(event)
+      end
+    end
+
+    private def update_metrics(event : ::Troupe::Event) : Nil
+      case event.type
+      when .activated?         then @metrics.inc("activations")
+      when .activation_failed? then @metrics.inc("activation_failures")
+      when .deactivated?       then @metrics.inc("deactivations")
+      when .turn_started?      then @metrics.inc("turns_started")
+      when .turn_ended?
+        if event.reason == "ok"
+          @metrics.inc("turns_completed")
+        else
+          @metrics.inc("turns_failed")
+        end
+      when .turn_expired?  then @metrics.inc("turns_expired")
+      when .save_failed?   then @metrics.inc("save_failures")
+      when .call_rejected? then @metrics.inc_role("rejections", event.actor_id.role)
       end
     end
 
@@ -67,14 +100,16 @@ module Troupe
 
     # 位置透明的本地调用入口（M1 全部本地；远程 transport 复用同一语义管道，见 docs/cluster.md）。
     def call(actor_id : ::Troupe::ActorId, method : String, args : ::JSON::Any = ::JSON::Any.new(nil),
-             deadline : ::Time::Span? = nil) : ::Troupe::CallFuture
+             deadline : ::Time::Span? = nil, traceparent : String? = nil) : ::Troupe::CallFuture
       @mutex.synchronize do
         raise CallRejectedError.new("Stage #{@name} 已停机，拒收新 Call", :shutdown, false) if @closed
         manifest = @repertoire[actor_id.role]?
         unless manifest
+          emit(Event.new(EventType::CallRejected, actor_id, @clock.now, method, "unknown_role"))
           raise UnknownRoleError.new("角色 #{actor_id.role} 未注册（actor #{actor_id}）")
         end
         unless manifest.turn_names.includes?(method)
+          emit(Event.new(EventType::CallRejected, actor_id, @clock.now, method, "whitelist"))
           raise CallRejectedError.new("方法 #{method.inspect} 不在角色 #{manifest.role} 的白名单（生命周期/内部方法不可 RPC）", :whitelist, false)
         end
         if @slots.size >= @config.max_activations
@@ -84,10 +119,13 @@ module Troupe
         now = @clock.now
         deadline_at = now + (deadline || @config.default_call_deadline)
         bytes = method.bytesize + args.to_json.bytesize + @config.queue_overhead_bytes
-        request = TurnRequest.new(@call_seq, method, args, deadline_at, Channel(CallReply).new(1), bytes, CancelSignal.new)
+        turn_traceparent = TraceContext.child_span(traceparent)
+        request = TurnRequest.new(@call_seq, method, args, deadline_at, Channel(CallReply).new(1), bytes,
+          CancelSignal.new, turn_traceparent, TraceContext.valid?(traceparent) ? traceparent : nil)
         slot = @slots[actor_id]?
         unless slot
-          slot = ActorSlot.new(actor_id, manifest, @store, @ownership, @clock, @config, @mode, ->(e : ::Troupe::Event) { emit(e) })
+          slot = ActorSlot.new(actor_id, manifest, @store, @ownership, @clock, @config, @mode,
+            ->(e : ::Troupe::Event) { emit(e) }, ->(t : ::Troupe::TraceEvent) { emit_trace(t) })
           @slots[actor_id] = slot
         end
         begin

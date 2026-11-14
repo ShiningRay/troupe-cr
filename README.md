@@ -2,7 +2,7 @@
 
 面向 Crystal 的 Virtual Actor 框架，语义对标 Orleans，沿用 Troupe 的剧团术语。
 
-> **当前状态：M1 单机核心 + M2 本地持久化（dev）。** 已实现 ActorId / Role manifest / Memory 与 SQLite PropStore（CAS+fencing）/ Stage / Agent / ActorSlot（single-flight）/ 有界 CallBoard / Intermission / Rehearsal。SQLite Provider 仅进程/单机持久（`cross_node_safe? = false`，不能跨节点恢复）；尚未实现 PostgreSQL Provider、TCP transport、集群路由、持久 reminder 与 Show；不要据此宣称 production-ready 或跨语言互操作。
+> **当前状态：M1 单机核心 + M2 持久化/语义硬化/可观测（dev）。** 已实现 ActorId / Role manifest / Memory 与 SQLite PropStore（CAS+fencing）/ Stage / Agent / ActorSlot（single-flight）/ 有界 CallBoard / Intermission / Rehearsal / 幂等记录 / 协作取消 / metrics 与 W3C trace 钩子。SQLite Provider 仅进程/单机持久（`cross_node_safe? = false`，不能跨节点恢复）；尚未实现 PostgreSQL Provider、TCP transport、集群路由、持久 reminder 与 Show；不要据此宣称 production-ready 或跨语言互操作。
 
 ## 文档
 
@@ -72,6 +72,19 @@ stage = Troupe::Stage.new(store: store, ownership: store.ownership)
 
 SQLite Provider 的 CAS 与 fencing 均为单条 SQL 原子语句；进程重启后从文件恢复。
 注意：**仅进程/单机持久**（`store.cross_node_safe? == false`），不承诺节点丢失或跨机恢复。
+
+## 可观测（M2）
+
+```crystal
+stage.on_event { |event| ... }                      # 结构化生命周期事件
+stage.on_trace { |trace| ... }                      # Turn 边界 TraceEvent（W3C traceparent）
+stage.metrics.counter("turns_completed")            # lifecycle/call 计数器
+
+future = agent.call(id, "charge", args, nil, "00-<32hex>-<16hex>-01")   # 传入调用方 W3C context
+ctx.traceparent                                     # Turn 内互调时显式作为父传递
+```
+
+核心零 OTel 依赖：`on_trace` 即桥接真实 OTel SDK 的钩子（对齐 troupejs onSpan 模式）。
 
 ## 实施阶段
 
