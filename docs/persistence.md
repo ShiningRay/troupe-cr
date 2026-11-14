@@ -32,6 +32,13 @@ production 必须拒绝不满足共享/fencing 合同的 Provider，而不是只
 不同指纹 `IdempotencyConflictError`、保留期过期视为新操作；记录与 Props 在同一原子提交内落盘
 （Memory 同锁、SQLite 单事务回滚验证），激活时装载未过期记录，重开（SQLite）后重放仍有效。
 
+实现状态（M3）：PostgreSQL 生产 Provider（`cross_node_safe? = true`）——acquire 用单语句
+`INSERT ... ON CONFLICT DO UPDATE ... WHERE 租期过期或同实例 RETURNING epoch` 发放单调 fencing token，
+跨实例有效租期内显式拒绝（retryable）；`renew` 同 epoch 续租；租期/过期判定全部用数据库服务器时钟
+`now()`。Props CAS + 租期有效期 + epoch 在单条 UPDATE 的 WHERE 内原子校验，幂等记录同事务提交。
+激活顺序 acquire→read/迁移→fenced write→on_stage 与"旧 epoch 写一律拒绝"由真实 PG 反例验证
+（含双节点接管：B 节点取得所有权提交后，A 的旧实例 save 被拒并失效，重新激活从 PG 快照继续）。
+
 ## 失败语义
 
 - CAS/fencing/保存失败使实例失效，后续调用从最后已提交快照恢复。

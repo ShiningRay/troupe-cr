@@ -30,6 +30,13 @@ module Troupe
         value.nil? ? 0_u64 : value.as(Int64).to_u64
       end
     end
+
+    def renew(actor_id : ::Troupe::ActorId, epoch : UInt64) : Bool
+      @mutex.synchronize do
+        value = @db.scalar("SELECT epoch FROM troupe_ownership WHERE actor_id = ?", actor_id.to_s)
+        !value.nil? && value.as(Int64) == epoch.to_i64
+      end
+    end
   end
 
   # SQLite 开发 Provider（PLAN M2，docs/persistence.md Provider 层级）：

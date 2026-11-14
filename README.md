@@ -2,7 +2,7 @@
 
 面向 Crystal 的 Virtual Actor 框架，语义对标 Orleans，沿用 Troupe 的剧团术语。
 
-> **当前状态：M1 单机核心 + M2 持久化/语义硬化/可观测（dev）。** 已实现 ActorId / Role manifest / Memory 与 SQLite PropStore（CAS+fencing）/ Stage / Agent / ActorSlot（single-flight）/ 有界 CallBoard / Intermission / Rehearsal / 幂等记录 / 协作取消 / metrics 与 W3C trace 钩子。SQLite Provider 仅进程/单机持久（`cross_node_safe? = false`，不能跨节点恢复）；尚未实现 PostgreSQL Provider、TCP transport、集群路由、持久 reminder 与 Show；不要据此宣称 production-ready 或跨语言互操作。
+> **当前状态：M1 单机核心 + M2 持久化/语义硬化/可观测/基准 + M3 PostgreSQL Provider（dev）。** 已实现 ActorId / Role manifest / Memory 与 SQLite / PostgreSQL PropStore（CAS+fencing，PG 为 `cross_node_safe? = true` 的生产 Provider）/ Stage / Agent / ActorSlot（single-flight）/ 有界 CallBoard / Intermission / Rehearsal / 幂等记录 / 协作取消 / metrics 与 W3C trace 钩子 / 基线基准。TCP transport、集群路由、持久 reminder 与 Show 尚未实现；多进程 kill -9 级故障注入矩阵尚未执行，不要据此宣称 production-ready 或跨语言互操作。
 
 ## 文档
 
@@ -94,6 +94,18 @@ stage = Troupe::Stage.new(store: store, ownership: store.ownership)
 
 SQLite Provider 的 CAS 与 fencing 均为单条 SQL 原子语句；进程重启后从文件恢复。
 注意：**仅进程/单机持久**（`store.cross_node_safe? == false`），不承诺节点丢失或跨机恢复。
+
+## PostgreSQL Provider（M3，生产）
+
+```crystal
+store = Troupe::PostgreSQLPropStore.open("postgres://troupe:troupe@127.0.0.1:5432/troupe",
+  owner_instance: "silo-1", lease_ms: 30_000)
+stage = Troupe::Stage.new(store: store, ownership: store.ownership)
+```
+
+所有权带租期（数据库服务器时钟判定）：跨实例有效租期内 acquire 显式拒绝（可重试），
+过期后可取得且 epoch 单调递增；旧 epoch 写一律被 fencing 拒绝。**多节点接管语义**
+（`cross_node_safe? == true`）。测试需设置 `TROUPE_PG_URL`（CI 已内置 postgres service）。
 
 ## 可观测（M2）
 

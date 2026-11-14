@@ -1,6 +1,6 @@
 name: troupe
-version: 0.7.0-dev.0
-description: Troupe Virtual Actor framework for Crystal — M1 core + M2 SQLite local persistence
+version: 0.8.0-dev.0
+description: Troupe Virtual Actor framework for Crystal — M1 core + M2 + M3 PostgreSQL provider
 license: MIT
 crystal: ">= 1.22"
 
@@ -8,6 +8,9 @@ dependencies:
   sqlite3:
     github: crystal-lang/crystal-sqlite3
     version: ">= 0.24.0"
+  pg:
+    github: will/crystal-pg
+    version: ">= 0.31.0"
 
 # 库 shard 无可执行入口；Actor 核心与 Provider 按 PLAN.md 分阶段实现。
 targets: {}

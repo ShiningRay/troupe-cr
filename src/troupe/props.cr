@@ -13,6 +13,10 @@ module Troupe
     abstract def acquire(actor_id : ::Troupe::ActorId) : UInt64
 
     abstract def current(actor_id : ::Troupe::ActorId) : UInt64
+
+    # 同 epoch 续租（跨节点 Provider 的 lease 语义；单节点 Provider 恒持有时返回 true，
+    # epoch 已被取代返回 false）。
+    abstract def renew(actor_id : ::Troupe::ActorId, epoch : UInt64) : Bool
   end
 
   class MemoryOwnershipStore < ::Troupe::OwnershipStore
@@ -25,6 +29,10 @@ module Troupe
 
     def current(actor_id : ::Troupe::ActorId) : UInt64
       @mutex.synchronize { @epochs[actor_id] }
+    end
+
+    def renew(actor_id : ::Troupe::ActorId, epoch : UInt64) : Bool
+      @mutex.synchronize { @epochs[actor_id] == epoch }
     end
   end
 

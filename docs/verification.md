@@ -244,3 +244,41 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - 基准不含网络/持久盘（Memory Provider）；SQLite 持久写放大与 PostgreSQL（M3）场景不在本轮口径。
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
+
+## M3（首项+次项）：PostgreSQL Props/Ownership Provider（2026-11-14）
+
+### 环境
+
+- 本机：Docker `troupe-pg`（postgres:15，端口 55444，用户/库同名 troupe）
+- 依赖：pg shard 0.31.0（will/crystal-pg）+ db 0.15.0
+- CI：ubuntu-latest postgres:15 service container（`TROUPE_PG_URL` 注入，postgres 用例必跑）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="postgres://troupe:troupe@127.0.0.1:55444/troupe" crystal spec
+# 75 examples, 0 failures, 0 errors, 0 pending（新增 5 例真实 PG 用例）
+# 未设置 TROUPE_PG_URL 时 PG 用例自动 pending，不伪造绿灯
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 已验证语义（含反例，全部连真实 PG）
+
+| 语义 | 反例/验收 |
+|---|---|
+| 契约一致性 | create 重复 → Conflict(:exists)；expectedRevision 过期 → Conflict(:revision)；`cross_node_safe? = true` |
+| fencing 优先 | 同实例重入 epoch 单调 +1；旧 epoch 写即使 revision 匹配也拒绝（CallRejected(:ownership)） |
+| lease 跨实例 | 其他实例有效租期内 acquire 显式拒绝（retryable）；同 epoch renew 续租成功；旧 epoch renew 失败 |
+| lease 过期接管 | 租期过期（数据库时钟判定）后另一节点可取得所有权，epoch 单调递增 |
+| 幂等原子提交 | revision 冲突 → 单事务回滚，记录不落盘；成功则同事务生效 |
+| Stage 端到端接管 | A 节点激活写入 → 租期过期后 B 节点 acquire 并提交 count=50 → A 的旧实例 save 被 fencing 拒绝失效 → 重新激活从 PG 已提交快照继续（51） |
+
+### 未验证边界（不宣称）
+
+- PLAN M3 验收中的"至少三个独立 Crystal 进程 + 扩容/kill -9/冻结恢复"完整故障注入矩阵尚未执行（本轮以同进程双实例模拟接管路径，真实多进程/kill -9 用例列入后续 M3 迭代）。
+- Reminder（持久 CueStore）不在本迭代（PLAN M3 后续项）。
+- PG 用例需要 `TROUPE_PG_URL`；本地未起容器时自动 pending（CI 必跑）。
+- acquire 的租期守卫不主动抢占：被拒方需等租期过期后重试（retryable=true），主动探测/续租心跳列入后续调度循环集成。

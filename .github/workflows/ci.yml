@@ -8,12 +8,31 @@ on:
 jobs:
   crystal:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: troupe
+          POSTGRES_PASSWORD: troupe
+          POSTGRES_DB: troupe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U troupe"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TROUPE_PG_URL: postgres://troupe:troupe@127.0.0.1:5432/troupe
+
     steps:
       - uses: actions/checkout@v4
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: "1.22"
-      - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libpq-dev
       - run: shards install
       - run: crystal spec
       - run: crystal tool format --check src spec
