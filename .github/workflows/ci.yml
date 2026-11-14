@@ -20,3 +20,4 @@ jobs:
       - run: crystal build src/troupe.cr --no-codegen
       - run: crystal run examples/cart.cr > /dev/null # Minimal Cart 示例冒烟
       - run: crystal docs -o .crystal/api-docs # API 文档可生成
+      - run: crystal run --release bench/run.cr -- --quick # 基准冒烟（数字无意义）

@@ -108,9 +108,20 @@ ctx.traceparent                                     # Turn 内互调时显式作
 
 核心零 OTel 依赖：`on_trace` 即桥接真实 OTel SDK 的钩子（对齐 troupejs onSpan 模式）。
 
+## 基线基准（M2）
+
+```sh
+crystal run --release bench/run.cr
+```
+
+五场景：激活吞吐 / KB per Actor / 热点 vs 分散调用 / CPU 阻塞调度延迟 / 队列饱和。
+口径声明与方法见 [docs/benchmarks.md](docs/benchmarks.md)——本仓自基线，不与其他语言异口径比较。
+
 ## 实施阶段
 
-按 [PLAN.md](PLAN.md) 已完成 M1 单机核心与 M2 的 SQLite 本地 Provider。M2 其余项：观测 metrics/trace、类型安全 Agent 宏、基准。
+按 [PLAN.md](PLAN.md) 已完成 M1 单机核心与 M2 全部五项（SQLite 本地 Provider、语义硬化、
+可观测、类型安全 Agent/宏 manifest、基线基准）。下一阶段 M3：PostgreSQL Provider、
+TCP transport、持久 reminder 与生产容错验收。
 
 ## 许可
 

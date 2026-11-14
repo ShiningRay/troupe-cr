@@ -228,3 +228,19 @@ crystal docs -o .crystal/api-docs
 - 宏生成的 manifest 不覆盖迁移声明（迁移仍走手写 `m.migrate`，与 schemaVersion 逐级迁移语义一致）。
 - 参数校验为 presence/type 级；深度 schema 校验（范围、自定义谓词）留待需要时。
 - `crystal docs` 未入 CI 门禁（本机验证可生成；CI 仅示例冒烟）。
+
+## M2（第五项）：基线基准（2026-11-14）
+
+程序：`bench/run.cr`（五场景，`--quick` 供 CI 冒烟）。完整方法、结果表与解读见
+[docs/benchmarks.md](benchmarks.md)。本机 release 记录（2026-11-14，Crystal 1.22.1 --release）：
+激活 24,293 actors/s（2,000 冷激活/82ms）、5.3 KB/actor（3,000 个，GC 后增量）、
+热点 364,373 calls/s（单 Actor inc+save 5,000 次）、分散 20,297 calls/s（500 Actor × 10，含激活）、
+CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照 idle p95 0.01ms）、
+队列饱和 64 accepted / 9,872 rejected（打满显式拒绝）+ 186ms 全量落盘。
+口径声明：本仓自基线，用于回归观察，不与其他语言实现异口径比较。
+
+### 未验证边界（不宣称）
+
+- 基准不含网络/持久盘（Memory Provider）；SQLite 持久写放大与 PostgreSQL（M3）场景不在本轮口径。
+- CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
+- 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。

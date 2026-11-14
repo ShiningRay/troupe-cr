@@ -22,13 +22,13 @@
 
 **验收**：并发首调只激活一次；100 个写 Turn 不交错；排队过期无副作用；执行超时不放行旧 Turn；CAS/保存失败从最后提交快照恢复；任意目录名下 Rehearsal 一致；v1→v3 逐级迁移且失败不写。——全部由 `spec/`（39 例，含反例）覆盖，命令与结果见 [docs/verification.md](docs/verification.md)。
 
-## M2：本地持久化、观测和 API 硬化
+## M2：本地持久化、观测和 API 硬化（已完成，2026-11-14）
 
 - [x] 选择开发用本地 Provider（优先 SQLite），原子 CAS 和重开恢复；说明不能跨节点恢复。（SQLitePropStore/SQLiteOwnershipStore，2026-11-14；CAS/fencing 均为单条 SQL 原子语句，`cross_node_safe? = false` 显式声明能力，Windows/MSYS2 与 CI ubuntu 均验证）
 - [x] 完善 UnknownOutcome、幂等请求记录、迁移、取消和 backpressure 语义。（2026-11-14：幂等记录与 Props 单事务原子提交、同键同指纹重放/不同指纹拒绝、失败重放、保留期过期；协作取消 `CallContext#cancel_requested?`/`CallFuture#cancel` 不可强行终止；UnknownOutcome 纤维模式证明（超时后原 Turn 占用通道至 settle、效果提交、无自动重试）；backpressure settle 后预算释放可重试；SQLite 重开迁移成功/失败不写）
 - [x] 结构化 lifecycle/call metrics、Trace 事件、W3C context；OTel 适配保持可选。（2026-11-14：StageMetrics 计数器由 emit 单点更新；TraceContext W3C 解析/派生（非法父静默降级、全零拒绝）；TraceEvent 于 Turn 边界产出（completed/failed/expired）经 `Stage#on_trace` 外送；调用链经 `ctx.traceparent` 显式传父；核心零 otel 依赖）
 - [x] 类型安全 Agent/宏 manifest、参数校验、公开 API 文档和 minimal Cart 示例。（2026-11-14：`troupe_manifest` 宏生成与手写等价的 Manifest + 嵌套类型安全 `Agent` 代理；`turn_with_schema` 参数 schema 在排队前校验（缺参/类型不符 → InvalidArgumentError，零副作用）；examples/cart.cr 冒烟入 CI；crystal docs 可生成）
-- [ ] 基准：激活吞吐、KB/Actor、热点/分散调用、CPU 阻塞、队列饱和；不与其他语言异口径比较。
+- [x] 基准：激活吞吐、KB/Actor、热点/分散调用、CPU 阻塞、队列饱和；不与其他语言异口径比较。（2026-11-14：bench/run.cr 五场景，release 记录见 docs/benchmarks.md——激活 24.3k actors/s、5.3 KB/actor、热点 364k calls/s、CPU 阻塞 victim 延迟≈spin 全长（协作式边界量化）、队列打满显式拒绝 64+9872；CI 仅 --quick 冒烟）
 
 **验收**：重启后恢复、复制边界一致、调用链可见、宏/手写注册行为一致、所有过载路径有界并明确拒绝。
 
