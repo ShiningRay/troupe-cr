@@ -1,8 +1,8 @@
 name: troupe
-version: 0.1.0-dev.0
-description: Troupe Virtual Actor framework for Crystal — design and project scaffold
+version: 0.2.0-dev.0
+description: Troupe Virtual Actor framework for Crystal — M1 minimal single-machine core
 license: MIT
 crystal: ">= 1.22"
 
-# 本轮不声明运行时依赖或可执行入口；Actor 核心按 PLAN.md 分阶段实现。
+# M1 无外部运行时依赖；本地持久化 Provider（M2）按 PLAN.md 引入。
 targets: {}

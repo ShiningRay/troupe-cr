@@ -1,8 +1,8 @@
 # Troupe.cr
 
-面向 Crystal 的 Virtual Actor 框架设计与项目脚手架，语义对标 Orleans，沿用 Troupe 的剧团术语。
+面向 Crystal 的 Virtual Actor 框架，语义对标 Orleans，沿用 Troupe 的剧团术语。
 
-> **当前状态：仅方案与脚手架。** 已定义 `Troupe` 命名空间和开发版本；尚未实现 Actor、激活、串行调度、持久化、网络或集群。不要把本仓当前测试通过理解为 Actor 运行时可用。
+> **当前状态：M1 单机最小核心（dev）。** 已实现 ActorId / Role manifest / Memory PropStore（CAS+fencing）/ Stage / Agent / ActorSlot（single-flight）/ 有界 CallBoard / Intermission / Rehearsal。尚未实现 SQLite/PostgreSQL Provider、TCP transport、集群路由、持久 reminder 与 Show；不要据此宣称 production-ready 或跨语言互操作。
 
 ## 文档
 
@@ -15,7 +15,7 @@
 - [当前验证](docs/verification.md)
 - [多语言统一规划](https://github.com/ShiningRay/troupe-planning)
 
-## 当前验证
+## 验证
 
 要求 Crystal >= 1.22。
 
@@ -25,11 +25,47 @@ crystal tool format --check src spec
 crystal build src/troupe.cr --no-codegen
 ```
 
-`--no-codegen` 只验证库源码可编译，不生成可执行程序。本轮没有 Actor 运行时基准或生产验收。
+`--no-codegen` 只验证库源码可编译，不生成可执行程序。各阶段真实命令、环境与结果记录在 [docs/verification.md](docs/verification.md)。
+
+## 最小用法（单机 Stage）
+
+```crystal
+require "troupe"
+
+class CartProps
+  include JSON::Serializable
+  property items : Array(String) = [] of String
+
+  def initialize
+  end
+end
+
+class CartActor < Troupe::Actor(CartProps)
+  def add(item : String) : Int32
+    props.items << item
+    save
+    props.items.size
+  end
+end
+
+stage = Troupe::Stage.new
+stage.register(Troupe::Manifest(CartProps).define("cart", CartActor) do |m|
+  m.schema_version 1
+  m.initial { CartProps.new }
+  m.turn("add", CartActor) do |actor, ctx, args|
+    JSON::Any.new(actor.add(args["item"].as_s).to_i64)
+  end
+end)
+
+id = Troupe::ActorId.new("app", "cart", "cart-1")
+result = Troupe::Agent.new(stage).call!(id, "add", JSON.parse(%({"item": "pear"})))
+```
+
+Turn 闭包走 JSON 参数/结果边界；`save` 以 revision CAS + epoch fencing 显式提交。测试请使用 `Troupe::Rehearsal`（固定 namespace、Memory Provider、虚拟时钟、pump 确定性调度）。
 
 ## 首个实施阶段
 
-按 [PLAN.md](PLAN.md) 先实现**单机最小核心**：稳定 Actor identity、类型安全 Props、Memory PropStore、single-flight 激活、严格串行 Turn、超时/背压和 deterministic tests。共享存储、集群、reminders 和流须在前置语义验收后实现。
+按 [PLAN.md](PLAN.md) 已完成**单机最小核心**（M1）。下一阶段（M2）：本地持久化 Provider、观测与 API 硬化。
 
 ## 许可
 

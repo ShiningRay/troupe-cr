@@ -11,16 +11,16 @@
 
 **门禁**：干净 checkout 可执行 spec/format/build；CI 名称不把脚手架测试描述为 Actor 验收。
 
-## M1：语义契约与最小单机核心
+## M1：语义契约与最小单机核心（已实现，2026-11-14）
 
-- [ ] 固定 ActorId、Role manifest、错误类型、Props/PropStore 接口和 JSON 边界试验。
-- [ ] Memory PropStore：原子 create/write CAS、read 隔离、revision/schemaVersion。
-- [ ] Stage/Repertoire/Agent：显式注册、RPC 白名单、位置透明本地调用。
-- [ ] ActorSlot：single-flight、on_stage/off_stage、Intermission、保存失败失效/重激活。
-- [ ] 单 Fiber FIFO CallBoard：严格串行、排队过期、执行占用、queue depth/bytes、Stage activation 限制。
-- [ ] Rehearsal 固定 namespace、Memory Provider、可注入时钟和确定性调度。
+- [x] 固定 ActorId、Role manifest、错误类型、Props/PropStore 接口和 JSON 边界试验。
+- [x] Memory PropStore：原子 create/write CAS、read 隔离、revision/schemaVersion。
+- [x] Stage/Repertoire/Agent：显式注册、RPC 白名单、位置透明本地调用。
+- [x] ActorSlot：single-flight、on_stage/off_stage、Intermission、保存失败失效/重激活。
+- [x] 单 Fiber FIFO CallBoard：严格串行、排队过期、执行占用、queue depth/bytes、Stage activation 限制。
+- [x] Rehearsal 固定 namespace、Memory Provider、可注入时钟和确定性调度。
 
-**验收**：并发首调只激活一次；100 个写 Turn 不交错；排队过期无副作用；执行超时不放行旧 Turn；CAS/保存失败从最后提交快照恢复；任意目录名下 Rehearsal 一致；v1→v3 逐级迁移且失败不写。
+**验收**：并发首调只激活一次；100 个写 Turn 不交错；排队过期无副作用；执行超时不放行旧 Turn；CAS/保存失败从最后提交快照恢复；任意目录名下 Rehearsal 一致；v1→v3 逐级迁移且失败不写。——全部由 `spec/`（39 例，含反例）覆盖，命令与结果见 [docs/verification.md](docs/verification.md)。
 
 ## M2：本地持久化、观测和 API 硬化
 

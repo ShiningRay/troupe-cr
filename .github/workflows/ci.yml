@@ -1,4 +1,4 @@
-name: Scaffold checks
+name: Checks
 
 on:
   push:
