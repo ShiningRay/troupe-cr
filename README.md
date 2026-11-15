@@ -132,6 +132,18 @@ runner.start # 轮询认领 → 作为普通 Turn 交付 → 成功 complete / �
 归属过滤（仅认领本节点拥有的 actor）→ 原子 claim（租期）→ 至少一次交付
 （失败/宕机到期重投，重复由业务幂等键兜底）。volatile timer 与 durable reminder 保持分离。
 
+## Show realtime（M4）
+
+```crystal
+hub = Troupe::ShowHub.new(stage)
+hub.show("events").actor_subscribe(id, "on_event")   # Actor Audience：经完整 Turn 交付
+hub.show("events").external_subscribe { |payload| ... } # 边界回调（非 Actor 观察者）
+report = hub.publish("events", payload)              # 在线尽力：失败放弃不重投
+```
+
+两类订阅分离；Actor 交付经同一 Stage 管道（串行/白名单/背压不变）。
+持久化诉求走 Reminder/Outbox——不把 realtime fan-out 称为持久流。
+
 ## 调度模式（M4）
 
 ```crystal

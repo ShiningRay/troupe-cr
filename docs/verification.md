@@ -245,6 +245,37 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
 
+## M4（第二项）：Show realtime（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="..." crystal spec
+# 122 examples, 0 failures, 0 errors, 0 pending（新增 8 例 Show 用例）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| Actor Audience 经完整 Turn | publish 交付为普通 Turn：props 经 save 持久化、白名单/串行语义不变 |
+| 分离性 | 边界回调与 Actor 订阅独立退订互不影响；并存时两条路径各自收到 |
+| 在线尽力（Turn 抛错） | 交付失败计入 actors_failed；无累积/补投；零持久化副作用（激活 record 保持初始值） |
+| 离线不保证（背压） | 队列满 → 交付入队触发背压 → actors_failed=1（在线尽力放弃） |
+| 边界回调隔离 | 坏回调抛错 → external_failed=1，后续订阅者仍收到 |
+| 未订阅 | publish 全零报告 |
+| 多 topic | 同一 Actor 订阅两个 topic 独立交付，last_topic 保持最后交付（完整 Turn 串行） |
+| 退订 | actor/external 退订后 publish 不投 |
+
+### 未验证边界（不宣称）
+
+- 在线尽力放弃 = **不重投**（实时语义）；持久化诉求走 Reminder（M3）/Outbox（M3 指引）/持久流（M5 待做）。
+- publish 为同步 fan-out（单 fiber 顺序交付）；并发交付与跨 Stage Show 属下一项（Show 跨 Stage、订阅生命周期和背压）。
+- 不把 fan-out 称为持久流：无事件日志/游标/ack/replay（M5 待做）。
 ## M4（首项）：ReadOnly 快照并发 + 显式 Improv 规则（2026-11-15）
 
 ### 命令与结果

@@ -27,6 +27,7 @@ require "./troupe/reminders_pg"
 require "./troupe/hash_ring"
 require "./troupe/roster"
 require "./troupe/outbox"
+require "./troupe/show"
 require "./troupe/rehearsal"
 
 # Troupe.cr：Crystal idiomatic virtual actor 框架（对标 Orleans 语义，见 DESIGN.md）。
