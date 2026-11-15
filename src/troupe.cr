@@ -32,6 +32,7 @@ require "./troupe/director"
 require "./troupe/stream"
 require "./troupe/stream_pg"
 require "./troupe/event_sourcing"
+require "./troupe/otel"
 require "./troupe/directory"
 require "./troupe/rehearsal"
 

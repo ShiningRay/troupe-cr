@@ -132,6 +132,19 @@ runner.start # 轮询认领 → 作为普通 Turn 交付 → 成功 complete / �
 归属过滤（仅认领本节点拥有的 actor）→ 原子 claim（租期）→ 至少一次交付
 （失败/宕机到期重投，重复由业务幂等键兜底）。volatile timer 与 durable reminder 保持分离。
 
+## OTel 导出适配器（M6）
+
+```crystal
+adapter = Troupe::OTel::Adapter.new(stage, ->(otlp_json : String) {
+  # 推送到 OTLP/HTTP collector（宿主传输实现）
+}, "main")
+adapter.attach
+adapter.export_all
+```
+
+零外部依赖：metrics→monotonic Sum、TraceEvent→spans（OTLP JSON v1 结构），
+sink 回调即 collector 推送点。
+
 ## 事件溯源扩展点与滚动升级（M6）
 
 ```crystal

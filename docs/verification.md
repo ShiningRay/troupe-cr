@@ -245,6 +245,43 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
 
+## M6（OTel 适配最小闭环）：OTLP JSON 导出适配器（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="..." crystal spec
+# 166 examples, 0 failures, 0 errors, 0 pending（新增 6 例 OTel 用例）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 实现要点
+
+- `Troupe::OTel`：零外部依赖 OTLP JSON v1 导出（resourceMetrics/spans 结构）；
+- 指标映射：StageMetrics 计数 → monotonic Sum 数据点（attributes=troupe.counter）；
+- span 映射：traceparent→traceId/spanId 十六进制、outcome→status（1=Ok 2=Error）、
+  parentSpanId 提取、unix nano 时间；
+- `OTel::Adapter`：attach 幂等订阅 trace 环形缓冲（默认 200），export_all 经 sink
+  回调交付（collector 推送=宿主实现），非法 traceparent → 全零 id。
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| 指标 OTLP 结构 | resource/scope/metrics/sum/dataPoints 结构与计数正确 |
+| span status Ok/Error | completed→code 1；failed→code 2 |
+| 非法 traceparent | 全零降级；parentSpanId 从 parent traceparent 提取 |
+| Adapter 闭环 | attach 幂等；export_all 双载荷；批导出清空缓冲 |
+| 环形上限 | limit=3 六 Turn 后恰 3 spans |
+| 零值计数 | snapshot 不含零值计数器 → 数据点缺省（OTel 端语义：缺省=0） |
+
+### 未验证边界（不宣称）
+
+- 无真实 OTLP collector 网络往返（sink 回调即宿主接入点，传输未做）；
+- 仅 JSON 格式（protobuf 二进制编码未做）；per-call 授权与资源量化未做。
 ## M6：事件溯源扩展点 / 滚动升级指引（2026-11-15）
 
 ### 命令与结果
