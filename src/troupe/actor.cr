@@ -11,11 +11,13 @@ module Troupe
     property revision : UInt64
     getter idempotency : Hash(String, ::Troupe::IdempotencyRecord)
     getter idempotency_retention : ::Time::Span
+    getter outbox : Hash(String, ::Troupe::OutboxRecord)
 
     def initialize(@store : ::Troupe::PropStore, @manifest : ::Troupe::ManifestBase,
                    @clock : ::Troupe::Clock, @epoch : UInt64, @revision : UInt64,
                    @idempotency : Hash(String, ::Troupe::IdempotencyRecord),
-                   @idempotency_retention : ::Time::Span)
+                   @idempotency_retention : ::Time::Span,
+                   @outbox : Hash(String, ::Troupe::OutboxRecord) = {} of ::String => ::Troupe::OutboxRecord)
     end
   end
 
@@ -28,8 +30,19 @@ module Troupe
     # 显式持久化：以 expectedRevision + epoch 原子 CAS 提交当前 Props 与幂等记录。
     # 失败（CAS 冲突 / fencing 拒绝）会使实例失效：后续调用从最后已提交快照重新激活。
     def save : Nil
-      record = @ctx.store.write(actor_id, @ctx.revision, @ctx.manifest.schema_version, @props.to_json, @ctx.epoch, @ctx.idempotency.values)
+      record = @ctx.store.write(actor_id, @ctx.revision, @ctx.manifest.schema_version, @props.to_json,
+        @ctx.epoch, @ctx.idempotency.values, @ctx.outbox.values)
       @ctx.revision = record.revision
+      @ctx.outbox.clear # 事件已随 Props 落盘，交由 OutboxDispatcher 投递
+    end
+
+    # 外部副作用 Outbox（docs/outbox.md）：事件记入 journal，save 时与 Props 同原子提交。
+    # event_id 缺省随机生成；调度/派发走 OutboxDispatcher（至少一次，接收方幂等）。
+    def emit_event(topic : String, payload = ::JSON::Any.new(nil), event_id : ::String? = nil) : ::String
+      eid = event_id || ::Random::Secure.hex(16)
+      @ctx.outbox[eid] = OutboxRecord.new(actor_id: actor_id, event_id: eid, topic: topic,
+        payload: payload, created_at: @ctx.clock.now)
+      eid
     end
 
     # 幂等执行（docs/persistence.md 失败语义；对齐 troupejs DESIGN §6.5）：

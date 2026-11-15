@@ -124,7 +124,8 @@ module Troupe
     # Props CAS + 幂等记录单事务原子提交（docs/persistence.md 失败语义）。
     # fencing：epoch 与租期有效期都在 UPDATE 的 WHERE 中，旧 epoch / 租期过期一律拒绝。
     def write(actor_id : ::Troupe::ActorId, expected_revision : UInt64, schema_version : Int32, data : String,
-              epoch : UInt64, idempotency : Array(::Troupe::IdempotencyRecord) = [] of ::Troupe::IdempotencyRecord) : ::Troupe::PropRecord
+              epoch : UInt64, idempotency : Array(::Troupe::IdempotencyRecord) = [] of ::Troupe::IdempotencyRecord,
+              outbox : Array(::Troupe::OutboxRecord) = [] of ::Troupe::OutboxRecord) : ::Troupe::PropRecord
       @mutex.synchronize do
         @db.transaction do |tx|
           conn = tx.connection
@@ -140,9 +141,37 @@ module Troupe
             conn.exec(IDEMPOTENCY_UPSERT, actor_id.to_s, entry.key, entry.fingerprint,
               entry.ok, entry.value, entry.error_class, entry.error_message, entry.expires_at)
           end
+          outbox.each do |entry|
+            conn.exec(OUTBOX_UPSERT, actor_id.to_s, entry.event_id, entry.topic,
+              entry.payload.to_json, entry.created_at)
+          end
           conn.exec("DELETE FROM troupe_idempotency WHERE expires_at <= extract(epoch from now())")
         end
         read_unlocked(actor_id).not_nil!
+      end
+    end
+
+    def poll_outbox(actor_id : ::Troupe::ActorId, limit : Int32) : Array(::Troupe::OutboxRecord)
+      @mutex.synchronize do
+        @db.query_all(
+          "SELECT event_id, topic, payload, created_at FROM troupe_outbox " \
+          "WHERE actor_id = $1 AND sent_at IS NULL ORDER BY created_at LIMIT $2",
+          actor_id.to_s, limit
+        ) do |rs|
+          event_id, topic, payload, created_at = rs.read(String, String, String, ::Time)
+          OutboxRecord.new(actor_id: actor_id, event_id: event_id, topic: topic,
+            payload: ::JSON.parse(payload), created_at: created_at)
+        end
+      end
+    end
+
+    def mark_sent(actor_id : ::Troupe::ActorId, event_id : String) : Bool
+      @mutex.synchronize do
+        @db.exec(
+          "UPDATE troupe_outbox SET sent_at = now() " \
+          "WHERE actor_id = $1 AND event_id = $2 AND sent_at IS NULL",
+          actor_id.to_s, event_id
+        ).rows_affected > 0
       end
     end
 
@@ -177,7 +206,20 @@ module Troupe
       "(actor_id TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, ok BOOLEAN NOT NULL, " \
       "value TEXT, error_class TEXT, error_message TEXT, expires_at BIGINT NOT NULL, " \
       "PRIMARY KEY (actor_id, key))",
+      "CREATE TABLE IF NOT EXISTS troupe_outbox " \
+      "(actor_id TEXT NOT NULL, event_id TEXT NOT NULL, topic TEXT NOT NULL, payload TEXT NOT NULL, " \
+      "created_at TIMESTAMPTZ NOT NULL, sent_at TIMESTAMPTZ, " \
+      "PRIMARY KEY (actor_id, event_id))",
     ]
+
+    private OUTBOX_UPSERT = <<-SQL
+      INSERT INTO troupe_outbox
+        (actor_id, event_id, topic, payload, created_at, sent_at)
+      VALUES ($1, $2, $3, $4, $5, NULL)
+      ON CONFLICT (actor_id, event_id) DO UPDATE SET
+        topic = EXCLUDED.topic, payload = EXCLUDED.payload, sent_at = NULL,
+        created_at = EXCLUDED.created_at
+    SQL
 
     private IDEMPOTENCY_UPSERT = <<-SQL
       INSERT INTO troupe_idempotency

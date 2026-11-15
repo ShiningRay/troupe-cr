@@ -146,6 +146,13 @@ stage.begin_drain            # 优雅 drain：拒新(:draining, 可漂移转发)
 Roster incarnation 单调协商（旧/同 incarnation 重入团拒绝）；HashRing vnodes+CRC32
 一致性环（节点增删只移动相邻区间键）。
 
+## 安全与外部副作用（M3）
+
+- Transport token 认证 + 轮换/宽限/撤销（常量时间比较；未认证断连）；
+- `ActorBase#emit_event` → Outbox 与 Props 同原子提交 → `OutboxDispatcher` 至少一次派发；
+- TLS 为方案指引（[docs/security.md](docs/security.md)），外部副作用指引见
+  [docs/outbox.md](docs/outbox.md)。
+
 ## 可观测（M2）
 
 ```crystal

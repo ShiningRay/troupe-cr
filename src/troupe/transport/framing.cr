@@ -37,17 +37,69 @@ module Troupe
     # 协议违规（魔数/长度上限/CRC）：transport 内部用，连接断开，不跨网络传播。
     class ProtocolError < ::Exception; end
 
-    # 信封：请求/回复/取消共用。字段全部 nilable 按类型取用。
+    # 认证失败（token 无效/未认证即发业务信封）：连接断开。
+    class AuthError < ::Exception; end
+
+    # 常量时间比较（避免短路时序泄漏 token 前缀）。
+    def self.secure_equals(a : String, b : String) : Bool
+      return false if a.bytesize != b.bytesize
+      diff = 0_u8
+      a.bytes.each_with_index { |byte, i| diff |= byte ^ b.byte_at(i) }
+      diff == 0
+    end
+
+    # Token 认证与轮换（PLAN M3 认证项）：current + grace 集合——rotate 后旧 token
+    # 在 revoke_old 之前仍可验证（轮换宽限），revoke 后立即失效。验证为常量时间比较。
+    class Authenticator
+      @current : String
+      @grace = Set(String).new
+      @mutex = Mutex.new
+
+      def current_token : String
+        @mutex.synchronize { @current }
+      end
+
+      def initialize(token : String)
+        raise ::ArgumentError.new("token 不能为空") if token.empty?
+        @current = token
+      end
+
+      # 轮换：新 token 生效，旧 token 进入宽限集。
+      def rotate(new_token : String) : Nil
+        raise ::ArgumentError.new("token 不能为空") if new_token.empty?
+        return if Transport.secure_equals(new_token, @current)
+        @mutex.synchronize do
+          @grace << @current
+          @current = new_token
+        end
+      end
+
+      # 撤销宽限集：轮换完成后调用，旧 token 立即失效。
+      def revoke_old : Nil
+        @mutex.synchronize { @grace.clear }
+      end
+
+      def verify?(token : String) : Bool
+        return false if token.empty?
+        @mutex.synchronize do
+          return true if Transport.secure_equals(token, @current)
+          @grace.any? { |old| Transport.secure_equals(token, old) }
+        end
+      end
+    end
+
+    # 信封：请求/回复/取消/认证共用。字段全部 nilable 按类型取用。
     class Envelope
       include JSON::Serializable
 
-      property t : String       # "req" | "rep" | "cancel"
+      property t : String       # "req" | "rep" | "cancel" | "auth"
       property id : Int64       # call_id（复用连接多路分发）
       property actor : String?  # 请求：ActorId 规范形式
       property m : String?      # 请求：方法名
       property a : ::JSON::Any? # 请求：参数
       property dl : Int64?      # 请求：deadline（Unix 毫秒；RFC3339 会截断毫秒）
       property tp : String?     # 请求：调用方 W3C traceparent
+      property tk : String?     # 认证：token（仅 auth 帧携带）
       property ok : Bool?       # 回复：是否成功
       property v : ::JSON::Any? # 回复：结果
       property ec : String?     # 回复：错误类别（Troupe::Error 子类全名）
@@ -56,7 +108,7 @@ module Troupe
       property ert : Bool?      # 回复：CallRejectedError#retryable
 
       def initialize(@t, @id, @actor = nil, @m = nil, @a = nil, @dl = nil, @tp = nil,
-                     @ok = nil, @v = nil, @ec = nil, @em = nil, @ek = nil, @ert = nil)
+                     @tk = nil, @ok = nil, @v = nil, @ec = nil, @em = nil, @ek = nil, @ert = nil)
       end
     end
 

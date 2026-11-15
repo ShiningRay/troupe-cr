@@ -205,7 +205,10 @@ module Troupe
       props = @manifest.parse_final(record.data)
       journal = Hash(String, ::Troupe::IdempotencyRecord).new
       @store.idempotency(@actor_id, @clock.now).each { |entry| journal[entry.key] = entry }
-      ctx = ActivationContext.new(@store, @manifest, @clock, epoch, record.revision, journal, @config.idempotency_retention)
+      outbox_journal = Hash(String, ::Troupe::OutboxRecord).new
+      @store.poll_outbox(@actor_id, 4096).each { |entry| outbox_journal[entry.event_id] = entry }
+      ctx = ActivationContext.new(@store, @manifest, @clock, epoch, record.revision, journal,
+        @config.idempotency_retention, outbox_journal)
       actor = @manifest.build_actor(@actor_id, props, ctx)
       actor.on_stage
       {actor, ctx}

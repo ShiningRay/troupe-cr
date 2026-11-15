@@ -20,13 +20,15 @@ module Troupe
       @port : Int32
       @max_frame : Int32
       @max_inflight : Int32
+      @auth : ::Troupe::Transport::Authenticator?
       @listener : ::TCPServer? = nil
       @sockets = Set(::TCPSocket).new
       @sockets_mutex = Mutex.new
       @closed = false
 
       def initialize(@stage, @host = "127.0.0.1", @port = 0,
-                     @max_frame = 1_048_576, @max_inflight = 256)
+                     @max_frame = 1_048_576, @max_inflight = 256,
+                     @auth : ::Troupe::Transport::Authenticator? = nil)
       end
 
       # 绑定并开始 accept 循环（后台 Fiber）；返回实际端口。
@@ -96,11 +98,24 @@ module Troupe
       private def handle_connection(sock : ::TCPSocket) : Nil
         state = ConnState.new
         write_mutex = Mutex.new
+        authed = @auth.nil? # 未启用认证即视为已认证
         begin
           loop do
             payload = Transport.read_frame(sock, @max_frame)
             break if payload.nil?
             envelope = Envelope.from_json(String.new(payload))
+            unless authed
+              # 认证握手：第一帧必须 auth；token 校验失败回 ok:false 后断连
+              raise AuthError.new("未认证即发送 #{envelope.t} 信封") unless envelope.t == "auth"
+              ok = @auth.try(&.verify?(envelope.tk.not_nil!))
+              write_mutex.synchronize do
+                Transport.write_frame_json(sock, Envelope.new("rep", 0_i64, ok: ok,
+                  ec: ok ? nil : "AuthError", em: ok ? nil : "token 无效"))
+              end
+              raise AuthError.new("token 无效") unless ok
+              authed = true
+              next
+            end
             case envelope.t
             when "cancel"
               state.cancel(envelope.id.to_u64)
@@ -127,8 +142,8 @@ module Troupe
               end
             end
           end
-        rescue e : Transport::ProtocolError | ::IO::Error | ::Socket::Error
-          # 协议违规/断连：关闭连接；在途 Turn 协作取消（效果仍可能提交，调用方按未知处理）
+        rescue e : Transport::ProtocolError | Transport::AuthError | ::IO::Error | ::Socket::Error
+          # 协议违规/认证失败/断连：关闭连接；在途 Turn 协作取消（调用方按未知处理）
         end
         state.fail_all
         begin
@@ -182,13 +197,15 @@ module Troupe
       @port : Int32
       @max_frame : Int32
       @max_inflight : Int32
+      @token : String?
       @mutex = Mutex.new
       @sock : ::TCPSocket? = nil
       @pending = Hash(::UInt64, ::Channel(::Troupe::CallReply)).new
       @call_seq : ::UInt64 = 0
       @closed = false
 
-      def initialize(@host, @port, @max_frame = 1_048_576, @max_inflight = 256)
+      def initialize(@host, @port, @max_frame = 1_048_576, @max_inflight = 256,
+                     @token : ::String? = nil)
       end
 
       def close : Nil
@@ -204,7 +221,8 @@ module Troupe
       # 调用方 deadline 先到 → CallTimeoutError(:executing)（结果未知，勿假定失败）。
       def call(actor_id : ::Troupe::ActorId, method : String, args : ::JSON::Any = ::JSON::Any.new(nil),
                deadline : ::Time::Span = 30.seconds, traceparent : ::String? = nil) : ::JSON::Any
-        sock : ::TCPSocket? = nil
+        # 先连接+认证（握手失败不遗留 pending 条目），成功后才注册
+        sock = @mutex.synchronize { ensure_connected_locked }
         call_id : ::UInt64 = 0
         reply_channel : ::Channel(::Troupe::CallReply)? = nil
         @mutex.synchronize do
@@ -215,7 +233,6 @@ module Troupe
           call_id = @call_seq
           reply_channel = ::Channel(::Troupe::CallReply).new
           @pending[call_id] = reply_channel.not_nil!
-          sock = ensure_connected_locked
         end
 
         deadline_at = ::Time.utc + deadline
@@ -264,6 +281,31 @@ module Troupe
         return sock if sock && !sock.closed?
         sock = ::TCPSocket.new(@host, @port)
         sock.sync = false
+        if token = @token
+          # 认证握手在 reader 启动前同步完成（无竞争）；失败断连并抛 AuthError。
+          # ack 读取带超时：服务端拒绝后立即断连，Windows 下读侧可能表现为
+          # IO::Error/EOF/阻塞，统一归一为 AuthError。
+          Transport.write_frame_json(sock, Envelope.new("auth", 0_i64, tk: token))
+          ack_channel = Channel(::Bytes?).new
+          spawn(name: "troupe-tcp-auth-ack") do
+            begin
+              ack_channel.send(Transport.read_frame(sock, @max_frame))
+            rescue e : ::Exception
+              ack_channel.send(nil)
+            end
+          end
+          ack_payload = select
+          when payload = ack_channel.receive
+            payload
+          when timeout(3.seconds)
+            nil
+          end
+          raise AuthError.new("认证握手失败：连接被关闭或超时") if ack_payload.nil?
+          ack = Envelope.from_json(String.new(ack_payload))
+          unless ack.ok
+            raise AuthError.new("认证被拒绝：#{ack.em || "token 无效"}")
+          end
+        end
         @sock = sock
         spawn(name: "troupe-tcp-client-read") do
           reader_loop(sock)
@@ -287,7 +329,7 @@ module Troupe
               ::Time.utc))
           end
         end
-      rescue e : Transport::ProtocolError | ::IO::Error | ::Socket::Error
+      rescue e : Transport::ProtocolError | Transport::AuthError | ::IO::Error | ::Socket::Error
         @mutex.synchronize do
           # 仅当仍指向旧连接时才失败在途调用（新连接的 pending 不受影响）
           if @sock.same?(sock)
@@ -305,7 +347,11 @@ module Troupe
       private def fail_pending_locked(cause : String) : Nil
         error = UnknownOutcomeError.new("#{cause}：在途调用结果未知，勿假定失败，按幂等键重试")
         @pending.each_value do |channel|
-          channel.send(CallReply.error(error, ::Time.utc))
+          # 无接收者（调用方已超时/异常退出）时直接丢弃——send 会永久阻塞
+          select
+          when channel.send(CallReply.error(error, ::Time.utc))
+          else
+          end
         end
         @pending.clear
       end

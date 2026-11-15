@@ -57,9 +57,15 @@ module Troupe
     abstract def create(actor_id : ::Troupe::ActorId, schema_version : Int32, data : String, epoch : UInt64) : ::Troupe::PropRecord
 
     abstract def write(actor_id : ::Troupe::ActorId, expected_revision : UInt64, schema_version : Int32, data : String,
-                       epoch : UInt64, idempotency : Array(::Troupe::IdempotencyRecord) = [] of ::Troupe::IdempotencyRecord) : ::Troupe::PropRecord
+                       epoch : UInt64, idempotency : Array(::Troupe::IdempotencyRecord) = [] of ::Troupe::IdempotencyRecord,
+                       outbox : Array(::Troupe::OutboxRecord) = [] of ::Troupe::OutboxRecord) : ::Troupe::PropRecord
 
     abstract def idempotency(actor_id : ::Troupe::ActorId, now : ::Time) : Array(::Troupe::IdempotencyRecord)
+
+    # 未投递 Outbox 记录（激活时装载 journal）；与 Props 同原子提交（见 write）。
+    abstract def poll_outbox(actor_id : ::Troupe::ActorId, limit : Int32) : Array(::Troupe::OutboxRecord)
+
+    abstract def mark_sent(actor_id : ::Troupe::ActorId, event_id : String) : Bool
 
     private def assert_fencing(actor_id : ::Troupe::ActorId, epoch : UInt64) : Nil
       current = @ownership.current(actor_id)
@@ -73,6 +79,8 @@ module Troupe
   class MemoryPropStore < ::Troupe::PropStore
     @records = Hash(::Troupe::ActorId, ::Troupe::PropRecord).new
     @journals = Hash(::Troupe::ActorId, Hash(String, ::Troupe::IdempotencyRecord)).new
+    @outbox = Hash(::Troupe::ActorId, Hash(String, ::Troupe::OutboxRecord)).new
+    @sent_outbox = Set(String).new
     @mutex = Mutex.new
 
     def cross_node_safe? : Bool
@@ -96,7 +104,8 @@ module Troupe
     end
 
     def write(actor_id : ::Troupe::ActorId, expected_revision : UInt64, schema_version : Int32, data : String,
-              epoch : UInt64, idempotency : Array(::Troupe::IdempotencyRecord) = [] of ::Troupe::IdempotencyRecord) : ::Troupe::PropRecord
+              epoch : UInt64, idempotency : Array(::Troupe::IdempotencyRecord) = [] of ::Troupe::IdempotencyRecord,
+              outbox : Array(::Troupe::OutboxRecord) = [] of ::Troupe::OutboxRecord) : ::Troupe::PropRecord
       @mutex.synchronize do
         record = @records[actor_id]?
         unless record
@@ -112,6 +121,11 @@ module Troupe
         @records[actor_id] = updated
         journal = @journals[actor_id] ||= Hash(String, ::Troupe::IdempotencyRecord).new
         idempotency.each { |entry| journal[entry.key] = entry }
+        # Outbox 与 Props 同锁原子提交：CAS 失败时 append 不会执行（整体不生效）
+        unless outbox.empty?
+          events = @outbox[actor_id] ||= Hash(String, ::Troupe::OutboxRecord).new
+          outbox.each { |entry| events[entry.event_id] = entry }
+        end
         updated
       end
     end
@@ -122,6 +136,26 @@ module Troupe
         return [] of ::Troupe::IdempotencyRecord unless journal
         journal.values.select { |entry| entry.expires_at > now.to_unix }
       end
+    end
+
+    def poll_outbox(actor_id : ::Troupe::ActorId, limit : Int32) : Array(::Troupe::OutboxRecord)
+      @mutex.synchronize do
+        events = @outbox[actor_id]?
+        return [] of ::Troupe::OutboxRecord unless events
+        events.values.select { |r| !@sent_outbox.includes?(sent_key(actor_id, r.event_id)) }.first(limit)
+      end
+    end
+
+    def mark_sent(actor_id : ::Troupe::ActorId, event_id : String) : Bool
+      @mutex.synchronize do
+        return false unless @outbox[actor_id]?.try(&.has_key?(event_id))
+        @sent_outbox << sent_key(actor_id, event_id)
+        true
+      end
+    end
+
+    private def sent_key(actor_id : ::Troupe::ActorId, event_id : String) : String
+      "#{actor_id}\u{1}#{event_id}"
     end
   end
 end

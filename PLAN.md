@@ -39,7 +39,7 @@
 - [x] TCP transport 实验：长度上限、帧校验、in-flight、方法白名单、错误分类、超时/取消。（2026-11-15：`Troupe::Transport` 帧协议 magic+length+CRC32（纯 Crystal，超限读前拒绝不分配内存）、TCPServer 复用 Stage 管道（白名单/背压/超时/取消不新增语义）+ 连接级 in-flight 上限 + cancel 信封协作取消传播、TCPClient call_id 多路复用 + deadline :executing + 断连 UnknownOutcome；7 例反例；认证/TLS 另行迭代）
 - [x] Roster/HashRing/漂移转发、生产角色与协议协商、优雅 drain。（2026-11-15：`Roster` 成员视图（join/heartbeat/sweep 判死，incarnation 协商——旧/同 incarnation 重入团 StaleIncarnationError 拒绝、死亡重入团单调 +1）；`HashRing` vnodes+CRC32 一致性环（增删只移动相邻区间）；`Router` 同步成员视图到环——死亡节点键漂移到后继、其他节点键不变；`Stage` 优雅 drain 三段式 begin(:draining retryable 拒新)→idle?(队列+在途清空)→finish(:shutdown)，执行占用语义不变；6 例反例。跨节点探测协议与远程 handoff 留待 M4/M5 实验）
 - [x] 持久 CueStore、归属过滤、至少一次重投与幂等。（2026-11-15：`ReminderStore` 契约 + Memory/PostgreSQL 双实现 + `ReminderRunner` 交付调度——稳定键 (actor_id, name)、payload、nextDue、claim lease、statusVersion；claim 单语句先按归属过滤（troupe_ownership 持有者，无记录任何节点可认领）再原子认领；complete/release 均 fencing（status_version+claim_holder+租期，DB 时钟判定）；交付失败 release 立即重投、认领者宕机租期过期他人重投——至少一次，重复由业务幂等兜底；9 例反例含真实 PG；volatile timer 与 durable reminder 保持分离）
-- [ ] 认证/TLS/密钥轮换方案；外部副作用 fencing/Outbox 指引。
+- [x] 认证/TLS/密钥轮换方案；外部副作用 fencing/Outbox 指引。（2026-11-15：`Transport::Authenticator` token 认证+轮换/宽限/撤销（常量时间比较）+ TCP 握手集成（未认证断连，3s ack 超时防 Windows 关闭时序死锁）；外部副作用 Outbox 三 Provider 同事务/同锁提交（`ActorBase#emit_event`+`OutboxDispatcher` 至少一次派发）；TLS 为 docs/security.md 方案指引（OpenSSL 包装集成点），Outbox 指引 docs/outbox.md；11 例反例）
 
 **验收**：至少三个独立 Crystal 进程连接真实 PostgreSQL，扩容、kill -9、冻结恢复后无未防护双活成功写；旧 epoch 写拒绝；Cue 跨进程恢复与重复幂等；POSIX CI 必跑故障用例。
 

@@ -245,6 +245,37 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
 
+## M3（认证/轮换/Outbox）：安全与外部副作用（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="postgres://troupe:troupe@127.0.0.1:55444/troupe" crystal spec
+# 107 examples, 0 failures, 0 errors, 0 pending（新增 8 例：auth 3 + outbox 5）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| token 认证 | 正确 token 正常通信；错误 token 握手拒绝（AuthError，不回显提交内容） |
+| 密钥轮换宽限 | rotate 后旧 token 可用（滚动窗口）；新 token 同时可用 |
+| 撤销 | revoke_old 后旧 token 立即拒绝，新 token 不受影响，服务存活 |
+| 常量时间比较 | 长度/内容不等均 false |
+| Outbox 同原子提交 | emit 后 save 落盘；save 失败（fencing/CAS）→ outbox 不落盘（Memory 同锁/SQLite+PG 单事务回滚） |
+| 至少一次派发 | 交付回调失败 → 不标记 → 下轮重投；成功 → mark_sent 后不再投 |
+| Actor 集成 | emit_event → save → 重开/派发器读出（跨"进程"持久） |
+
+### 未验证边界（不宣称）
+
+- TLS 未实现（docs/security.md 为方案指引：OpenSSL 包装集成点，构建验证留待独立迭代）；
+- 认证仅保护连接建立，无 per-call 授权；帧协议不防重放（依赖 TLS/幂等键）；
+- Outbox 至少一次必然可能重复——接收方幂等（event_id）是使用前提；
+- 派发器无归属过滤（与 owner 解耦），多节点并发派发由轮询去重（mark_sent 原子性）兜底。
 ## M3（持久 CueStore/Reminder）：归属过滤 + 至少一次重投（2026-11-15）
 
 ### 命令与结果
