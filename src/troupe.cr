@@ -19,6 +19,8 @@ require "./troupe/actor_slot"
 require "./troupe/stage"
 require "./troupe/agent"
 require "./troupe/typed_agent"
+require "./troupe/transport/framing"
+require "./troupe/transport/tcp"
 require "./troupe/rehearsal"
 
 # Troupe.cr：Crystal idiomatic virtual actor 框架（对标 Orleans 语义，见 DESIGN.md）。

@@ -245,6 +245,52 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
 
+## M3（TCP transport 实验）：帧协议与服务端/客户端（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="postgres://troupe:troupe@127.0.0.1:55444/troupe" crystal spec
+# 84 examples, 0 failures, 0 errors, 0 pending（新增 7 例 TCP 用例）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 实现要点
+
+- 帧协议：`magic("TRP1") + length(u32 LE) + crc32(u32 LE) + payload`；CRC32 纯 Crystal 实现
+  （Windows 构建无 zlib）；长度上限在读 payload **之前**校验，超限不分配内存；
+  魔数/超限/CRC 不符 = 协议违规，立即断连。
+- TCPServer：包既有 Stage——白名单/参数校验/背压/超时/取消语义全部复用，不新增调用语义；
+  连接级 in-flight 上限（超限回 CallRejectedError(:backpressure, retryable)，不断连）；
+  cancel 信封 → 既有 CallFuture#cancel；断连时协作取消在途 Turn。
+- TCPClient：单连接 call_id 多路分发；deadline 用 Unix 毫秒跨线（RFC3339 截断毫秒的坑）；
+  调用方 deadline 先到 → CallTimeoutError(:executing)；断连 → 在途调用 UnknownOutcomeError；
+  新连接自动重建，既有 pending 不受影响。
+- 错误分类跨线：Troupe 错误带结构化字段（kind/phase/reason/retryable）原样重建；
+  业务异常与未知类别保留类别名+消息降级为普通 Exception（与 troupejs 行为一致）。
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| 端到端 | 类型安全结果跨线；白名单(:whitelist)/未知角色/业务异常跨线保真 |
+| 长度上限 | 4096B 帧 vs 512B 上限：服务端读前拒绝并断连；服务存活、新客户端正常 |
+| 帧校验 | 错误 CRC → 协议违规断连；新连接不受影响 |
+| in-flight | 上限 2：第 3 个调用显式拒绝(:backpressure, retryable)；放行后前两个完成 |
+| 超时 | 调用方 deadline 300ms 先到 → :executing（结果未知）；Turn settle 后效果照常提交 |
+| 取消 | cancel 管线跨线（未匹配 id 无副作用）；后续调用完好 |
+| 断连恢复 | 服务端整个关闭 → 在途调用 UnknownOutcomeError；同 Stage 新 server 实例恢复服务，快照延续 |
+
+### 未验证边界（不宣称）
+
+- 认证/TLS/密钥轮换不在本实验（PLAN M3 认证项另行迭代）。
+- cancel 为协作式：服务端 Turn 不响应信号时不可强杀（DESIGN 边界）。
+- 客户端 deadline 到期后不撤回服务端在途 Turn（结果未知语义的一部分；服务端 Turn 自行 settle）。
+- 未做网络分区/半开连接/粘包压力等网络层故障注入；帧协议为实验性质，公共跨语言协议仍待 ADR（PLAN M5）。
+
 ## M3（首项+次项）：PostgreSQL Props/Ownership Provider（2026-11-14）
 
 ### 环境

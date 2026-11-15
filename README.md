@@ -107,6 +107,20 @@ stage = Troupe::Stage.new(store: store, ownership: store.ownership)
 过期后可取得且 epoch 单调递增；旧 epoch 写一律被 fencing 拒绝。**多节点接管语义**
 （`cross_node_safe? == true`）。测试需设置 `TROUPE_PG_URL`（CI 已内置 postgres service）。
 
+## TCP transport（M3，实验）
+
+```crystal
+server = Troupe::Transport::TCPServer.new(stage, "127.0.0.1", 0)   # 包既有 Stage
+port = server.listen
+
+client = Troupe::Transport::TCPClient.new("127.0.0.1", port)
+client.call(id, "increment", args)   # 白名单/背压/超时/取消语义与本地一致
+```
+
+帧协议带长度上限与 CRC32 校验（超限读前拒绝）；连接级 in-flight 上限；deadline 超时得
+`:executing` 结果未知；断连在途调用得 `UnknownOutcomeError`；cancel 信封传播协作取消。
+认证/TLS 另行迭代（PLAN M3）。
+
 ## 可观测（M2）
 
 ```crystal

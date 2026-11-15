@@ -36,7 +36,7 @@
 
 - [x] PostgreSQL Props/Ownership：事务、CAS、lease、单调 epoch 与 fencing。（2026-11-14：PostgreSQLPropStore/PostgreSQLOwnershipStore——acquire 单语句 RETURNING 带租期守卫、跨实例租期内拒绝可重试、同实例/过期重取 epoch 单调、renew 同 epoch 续租、fencing（epoch+租期有效期）在单条 UPDATE 的 WHERE 内原子校验、幂等记录单事务提交；`cross_node_safe? = true`；CI 以 postgres service 必跑真实 PG 用例；reminder 部分属后续项）
 - [x] 激活先 acquire 再读/迁移/写；所有旧 epoch 写拒绝。（M1 激活顺序已有反例；本轮以真实 PG 补端到端接管反例——另一节点取得所有权提交后，旧实例 save 被 fencing 拒绝并失效，重新激活从 PG 已提交快照继续）
-- [ ] TCP transport 实验：长度上限、帧校验、in-flight、方法白名单、错误分类、超时/取消。
+- [x] TCP transport 实验：长度上限、帧校验、in-flight、方法白名单、错误分类、超时/取消。（2026-11-15：`Troupe::Transport` 帧协议 magic+length+CRC32（纯 Crystal，超限读前拒绝不分配内存）、TCPServer 复用 Stage 管道（白名单/背压/超时/取消不新增语义）+ 连接级 in-flight 上限 + cancel 信封协作取消传播、TCPClient call_id 多路复用 + deadline :executing + 断连 UnknownOutcome；7 例反例；认证/TLS 另行迭代）
 - [ ] Roster/HashRing/漂移转发、生产角色与协议协商、优雅 drain。
 - [ ] 持久 CueStore、归属过滤、至少一次重投与幂等。
 - [ ] 认证/TLS/密钥轮换方案；外部副作用 fencing/Outbox 指引。
