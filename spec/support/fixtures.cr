@@ -35,6 +35,21 @@ class CounterActor < Troupe::Actor(CounterProps)
     save
     props.count
   end
+
+  # Reminder spec 用：类级投递计数（跨激活保留，注入前 N 次失败）
+  @@reminder_deliveries = 0
+
+  def self.reset_reminder_deliveries!
+    @@reminder_deliveries = 0
+  end
+
+  def self.bump_reminder_delivery!
+    @@reminder_deliveries += 1
+  end
+
+  def self.reminder_deliveries
+    @@reminder_deliveries
+  end
 end
 
 class SlowProps

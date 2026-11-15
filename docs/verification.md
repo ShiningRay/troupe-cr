@@ -245,6 +245,49 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
 
+## M3（持久 CueStore/Reminder）：归属过滤 + 至少一次重投（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="postgres://troupe:troupe@127.0.0.1:55444/troupe" crystal spec
+# 93 examples, 0 failures, 0 errors, 0 pending（新增 9 例：Memory 6 + PG 3）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 实现要点
+
+- `ReminderStore` 契约 + Memory/PostgreSQL 双实现：稳定键 (actor_id, name)、turn、payload、
+  nextDue、claim lease、statusVersion（docs/persistence.md Reminders 规格）。
+- claim_due 单语句**先按归属过滤（troupe_ownership 持有者）再原子认领**（PG UPDATE+元组 IN 子查询，
+  租期/到期判定全用 DB 时钟 now()）；无所有权记录的 reminder 任何节点可认领（调度先于激活）。
+- complete/release 均 fencing：status_version + claim_holder + 租期有效同时匹配；
+  失配返回 false → 提醒留给当前 owner 重投（不丢失）。
+- `ReminderRunner`：claim → 作为普通 Actor Turn 交付（经同一 Stage 管道，白名单/背压/超时不变）
+  → 成功 complete / 失败 release 立即重投。poll_once 供测试/宿主确定性驱动（manual_pump 支持
+  Rehearsal）；start/stop 为生产轮询循环。
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| 到期才认领 | due_at 未到 → claim_due 为空 |
+| 归属过滤 | node-b 认领不到 node-a 持有 actor 的 reminder；所有权转移 + 租期过期后 node-b 可认领 |
+| 至少一次（交付失败） | Turn 抛错 → release → 立即重投（status_version 递增） |
+| 至少一次（认领者宕机） | claim 后不 complete → 租期过期 → 其他 owner 重投 |
+| fencing 反例 | 旧 status_version 的 complete 被拒，reminder 不丢；正确版本删除成功 |
+| cancel | 已取消不再投递；重复 cancel 返回 false |
+| Runner 确定性 | 前两次注入失败 + 第三次成功 → 最终恰投递一次（效果 count=1，无重复） |
+| PG 契约 | 上述语义在真实 PostgreSQL 上同样成立（CI service 必跑） |
+
+### 未验证边界（不宣称）
+
+- 多节点 ReminderRunner 并发轮询的争用行为仅由 PG 原子 claim SQL 保证，未做长时并发压测。
+- Runner 轮询间隔/批量为固定配置；动态调节与 metric 暴露列入 M4 运维项。
+- 重复投递的兜底是业务幂等键（`ActorBase#idempotent`），框架不承诺 exactly-once（DESIGN 明确禁止）。
 ## M3（TCP transport 实验）：帧协议与服务端/客户端（2026-11-15）
 
 ### 命令与结果

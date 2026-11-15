@@ -16,7 +16,12 @@ module Troupe
     @lease_ms : Int64
     @mutex = Mutex.new
 
-    def initialize(@db : ::DB::Database, @owner_instance : String, @lease_ms : Int64)
+    getter instance_name : String
+
+    def initialize(db : ::DB::Database, owner_instance : String, @lease_ms : Int64)
+      @db = db
+      @owner_instance = owner_instance
+      @instance_name = owner_instance
     end
 
     private ACQUIRE_SQL = <<-SQL

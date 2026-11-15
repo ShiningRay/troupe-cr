@@ -38,7 +38,7 @@
 - [x] 激活先 acquire 再读/迁移/写；所有旧 epoch 写拒绝。（M1 激活顺序已有反例；本轮以真实 PG 补端到端接管反例——另一节点取得所有权提交后，旧实例 save 被 fencing 拒绝并失效，重新激活从 PG 已提交快照继续）
 - [x] TCP transport 实验：长度上限、帧校验、in-flight、方法白名单、错误分类、超时/取消。（2026-11-15：`Troupe::Transport` 帧协议 magic+length+CRC32（纯 Crystal，超限读前拒绝不分配内存）、TCPServer 复用 Stage 管道（白名单/背压/超时/取消不新增语义）+ 连接级 in-flight 上限 + cancel 信封协作取消传播、TCPClient call_id 多路复用 + deadline :executing + 断连 UnknownOutcome；7 例反例；认证/TLS 另行迭代）
 - [ ] Roster/HashRing/漂移转发、生产角色与协议协商、优雅 drain。
-- [ ] 持久 CueStore、归属过滤、至少一次重投与幂等。
+- [x] 持久 CueStore、归属过滤、至少一次重投与幂等。（2026-11-15：`ReminderStore` 契约 + Memory/PostgreSQL 双实现 + `ReminderRunner` 交付调度——稳定键 (actor_id, name)、payload、nextDue、claim lease、statusVersion；claim 单语句先按归属过滤（troupe_ownership 持有者，无记录任何节点可认领）再原子认领；complete/release 均 fencing（status_version+claim_holder+租期，DB 时钟判定）；交付失败 release 立即重投、认领者宕机租期过期他人重投——至少一次，重复由业务幂等兜底；9 例反例含真实 PG；volatile timer 与 durable reminder 保持分离）
 - [ ] 认证/TLS/密钥轮换方案；外部副作用 fencing/Outbox 指引。
 
 **验收**：至少三个独立 Crystal 进程连接真实 PostgreSQL，扩容、kill -9、冻结恢复后无未防护双活成功写；旧 epoch 写拒绝；Cue 跨进程恢复与重复幂等；POSIX CI 必跑故障用例。

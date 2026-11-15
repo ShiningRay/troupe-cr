@@ -121,6 +121,17 @@ client.call(id, "increment", args)   # 白名单/背压/超时/取消语义与�
 `:executing` 结果未知；断连在途调用得 `UnknownOutcomeError`；cancel 信封传播协作取消。
 认证/TLS 另行迭代（PLAN M3）。
 
+## 持久 Reminder（M3）
+
+```crystal
+runner = Troupe::ReminderRunner.new(stage, reminder_store, "silo-1", ownership)
+runner.schedule(id, "retry-payment", "on_reminder", payload, due_at: 5.minutes.from)
+runner.start # 轮询认领 → 作为普通 Turn 交付 → 成功 complete / 失败重投
+```
+
+归属过滤（仅认领本节点拥有的 actor）→ 原子 claim（租期）→ 至少一次交付
+（失败/宕机到期重投，重复由业务幂等键兜底）。volatile timer 与 durable reminder 保持分离。
+
 ## 可观测（M2）
 
 ```crystal

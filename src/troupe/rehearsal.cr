@@ -10,12 +10,14 @@ module Troupe
     getter namespace : String
     getter store : ::Troupe::MemoryPropStore
     getter ownership : ::Troupe::MemoryOwnershipStore
+    getter reminders : ::Troupe::MemoryReminderStore
     getter events : Array(::Troupe::Event)
 
     def initialize(@namespace : String = "rehearsal", config : ::Troupe::StageConfig = StageConfig.new)
       @clock = VirtualClock.new
       @ownership = MemoryOwnershipStore.new
       @store = MemoryPropStore.new(@ownership)
+      @reminders = MemoryReminderStore.new(@ownership)
       @events = [] of ::Troupe::Event
       @stage = Stage.new(clock: @clock, store: @store, ownership: @ownership,
         mode: SchedulerMode::Manual, config: config, name: "rehearsal:#{@namespace}")

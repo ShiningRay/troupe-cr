@@ -52,3 +52,7 @@ production 必须拒绝不满足共享/fencing 合同的 Provider，而不是只
 - 持久 reminder 具备稳定名称、payload、nextDue、claim lease、statusVersion。
 - 认领后作为普通 Actor Turn 执行，至少一次；失败/宕机到期重投，业务幂等。
 - 多节点调度先按当前归属过滤，再原子 claim，减少所有节点抢同一批记录。
+
+实现状态（M3）：`ReminderStore` 契约 + Memory/PostgreSQL 双实现 + `ReminderRunner`。
+complete/release 均 fencing（status_version + claim_holder + 租期有效，DB 时钟判定），
+认领期间所有权丢失时提醒留给当前 owner 重投（不丢失）。
