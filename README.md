@@ -158,6 +158,18 @@ m.turn "apply",  OrderActor              do |actor, ctx, args| ... end  # strict
 read_only/improv 不占 strict 串行队列（写不饥饿）；improv 冲突显式拒绝给调用方。
 quiesce/drain 等待所有并发在飞。
 
+## 持久流（M5）
+
+```crystal
+store = Troupe::MemoryStreamStore.new            # 或 PostgreSQLStreamStore（M5 持久 Provider）
+store.append("orders", payload)
+reader = Troupe::StreamReader.new(store, "worker-1", "orders")
+reader.poll_each { |event| ... }                 # 游标推进（不 ack 重投 = at-least-once）
+store.retain_before("orders", seq)               # 保留裁剪（慢消费者丢失为显式代价）
+```
+
+事件日志/游标/ack/replay/保留/慢消费者——与 Show realtime 分层（fan-out ≠ 持久流）。
+
 ## Director 与健康端点（M4）
 
 ```crystal

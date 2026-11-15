@@ -245,6 +245,46 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
 
+## M5（首项）：持久流（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="..." crystal spec
+# 144 examples, 0 failures, 0 errors, 0 pending（新增 12 例：Memory 9 + PG 3）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 实现要点
+
+- `StreamStore` 契约 + Memory/PostgreSQL 双 Provider：事件日志追加写（PG 用全局
+  SEQUENCE nextval——全局单调、per-topic 保序）；
+- per-consumer 持久游标：ack GREATEST 只前进（回退拒绝）；跨运行/跨"进程"持久（PG 表）；
+- 保留裁剪 `retain_before`：慢消费者被裁事件不可重放（显式代价，文档化）；
+- `StreamReader`：分批 poll（limit）、显式 ack、replay（游标无关）、poll_each
+  **失败停止**（游标不越过失败条目——失败条目及其后下轮重投）。
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| 日志保序 | seq 全局单调、per-topic 升序读取 |
+| ack 游标 | ack 后 poll 从游标之后；回退 ack 返回 false 且游标不变 |
+| at-least-once | 不 ack → 同批重放；新 reader 实例（模拟重启）同批重放 |
+| 双消费者独立 | 游标互不影响 |
+| 保留裁剪 | retain 裁剪数正确；慢消费者从现存最早继续（丢失可见）；已 ack 消费者不受影响 |
+| 慢消费者分批 | poll limit=2 分批拉取；append 与消费解耦 |
+| replay | 游标无关显式重放（任意 from_seq） |
+| poll_each 失败停止 | 中间条目失败 → 游标不越过 → 失败条目及其后下轮重投 |
+| PG 持久 | 随机 topic 隔离跨运行残留；断言全部相对化 |
+
+### 未验证边界（不宣称）
+
+- seq 为全局单调（非 per-topic 紧凑）；保留策略仅"裁至 min_seq"（TTL/按量保留策略列入后续）；
+- 未做多进程并发 append 压测（SEQUENCE 原子性由 PG 保证）；消费组/负载均衡（多消费者同组分片）不在本期。
 ## M4（第四项）：Director / 健康与指标端点（2026-11-15）
 
 ### 命令与结果

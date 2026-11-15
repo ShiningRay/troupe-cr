@@ -54,7 +54,7 @@
 
 ## M5：可靠消息、目录与互操作（统一 ADR 后）
 
-- [ ] 持久流：事件日志、游标、ack/replay、保留、慢消费者和 Provider；优先复用成熟消息系统。
+- [x] 持久流：事件日志、游标、ack/replay、保留、慢消费者和 Provider。（2026-11-15：`StreamStore` 契约 + Memory/PostgreSQL 双 Provider——事件日志 seq 全局单调（PG SEQUENCE）per-topic 保序、per-consumer 持久游标（ack GREATEST 只前进，回退拒绝）、不 ack 重放 at-least-once、retain_before 保留裁剪（慢消费者被裁事件丢失为显式代价）、StreamReader 分批 poll/poll_each 失败停止不越过/replay 显式重放；跨运行持久（PG 表）；12 例反例含真实 PG；优先复用成熟消息系统——当前自研最小实现，消息队列 Provider 适配列入 M6 评估）
 - [ ] 版本化 directory、capabilities/resource placement、handoff/recovery 与 activation rebalancing。
 - [ ] 公共协议：canonical identity/hash、方法/schema ID、payload、错误、deadline/cancel、trace 和版本协商。
 - [ ] 与 troupe-planning golden fixtures/contract tests 对齐，再决定跨语言客户端或异构 silo。
