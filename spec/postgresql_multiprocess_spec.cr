@@ -1,3 +1,4 @@
+require "file_utils"
 require "./spec_helper"
 
 # PLAN M3 验收（多进程部分）：至少三个独立 Crystal 进程连接真实 PostgreSQL，
@@ -7,6 +8,7 @@ PG_URL_MP = ENV["TROUPE_PG_URL"]?
 def mp_build_worker : String
   bin = File.join(".crystal", "pg_worker")
   unless File.exists?(bin)
+    FileUtils.mkdir_p(File.dirname(bin)) # CI fresh checkout 无 .crystal/，ld 需要目录存在
     result = Process.run("crystal", ["build", "spec/support/pg_worker.cr", "-o", bin],
       output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
     raise "worker 编译失败" unless result.success?
