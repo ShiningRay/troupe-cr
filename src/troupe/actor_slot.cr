@@ -87,6 +87,13 @@ module Troupe
       @mutex.synchronize { @last_activity }
     end
 
+    # 无排队且无执行中 Turn（drain 完成判定用）。
+    def idle? : Bool
+      @mutex.synchronize do
+        !@executing && @board.empty?
+      end
+    end
+
     # 关闭：停收新请求、清空队列（逐个回复 Shutdown 拒绝）、下线实例并停止调度 Fiber。
     # Fiber 模式下 off_stage 由消费 Fiber 在 settle 后执行，避免与执行中 Turn 竞争。
     def close(reason : String) : Nil

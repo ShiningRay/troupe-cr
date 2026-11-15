@@ -1,32 +1,6 @@
 require "./spec_helper"
 
 # PLAN M3 transport 实验：TCP 帧协议（长度上限/帧校验/in-flight/白名单/错误分类/超时/取消）。
-class Gate2Props
-  include JSON::Serializable
-  property count : Int32 = 0
-
-  def initialize
-  end
-end
-
-class Gate2Actor < Troupe::Actor(Gate2Props)
-  @@gate : Channel(Nil) = Channel(Nil).new
-
-  def self.gate
-    @@gate
-  end
-
-  def self.reset!
-    @@gate = Channel(Nil).new
-  end
-
-  def self.open!
-    @@gate.send(nil)
-  rescue
-    nil
-  end
-end
-
 def tcp_setup(max_inflight = 64, max_frame = 1_048_576)
   Gate2Actor.reset!
   stage = Troupe::Stage.new

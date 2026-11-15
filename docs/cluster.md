@@ -9,6 +9,10 @@ Troupe.cr 保持 Troupe 现有应用内 Stage 方向，不先引入 Orbit 式独
 ## 必须分开的组件
 
 - **Roster**：成员视图、join/leave、incarnation、探测、死亡与重新入团。
+  实现状态（M3）：`Roster`（心跳超时判死 + incarnation 单调协商，StaleIncarnationError 拒绝
+  旧/同 incarnation 重加入）、`HashRing`（vnodes+CRC32 一致性环）、`Router`（成员视图同步到环，
+  死亡节点键漂移到后继而其他节点键不变）、`Stage` 优雅 drain（begin→idle?→finish 三段式，
+  新 Call 得 :draining retryable，可漂移转发）。
 - **Playbill / Placement**：角色兼容的候选节点与位置策略。
 - **Directory（后续 ADR）**：activation 注册/定位、缓存失效、视图交接和恢复。
 - **Ownership**：某 Actor 当前写所有权、lease 和 fencing，不等于 Roster 心跳。

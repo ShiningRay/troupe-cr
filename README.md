@@ -132,6 +132,20 @@ runner.start # 轮询认领 → 作为普通 Turn 交付 → 成功 complete / �
 归属过滤（仅认领本节点拥有的 actor）→ 原子 claim（租期）→ 至少一次交付
 （失败/宕机到期重投，重复由业务幂等键兜底）。volatile timer 与 durable reminder 保持分离。
 
+## 成员视图与路由（M3）
+
+```crystal
+roster = Troupe::Roster.new(timeout: 10.seconds)
+roster.join("silo-1", "host:1")
+router = Troupe::Router.new(Troupe::HashRing.new, roster)
+router.route(id)             # canonical identity → 归属节点（死亡节点键漂移到后继）
+
+stage.begin_drain            # 优雅 drain：拒新(:draining, 可漂移转发) → idle? → finish_drain
+```
+
+Roster incarnation 单调协商（旧/同 incarnation 重入团拒绝）；HashRing vnodes+CRC32
+一致性环（节点增删只移动相邻区间键）。
+
 ## 可观测（M2）
 
 ```crystal

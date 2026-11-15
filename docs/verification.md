@@ -288,6 +288,51 @@ crystal build src/troupe.cr --no-codegen
 - 多节点 ReminderRunner 并发轮询的争用行为仅由 PG 原子 claim SQL 保证，未做长时并发压测。
 - Runner 轮询间隔/批量为固定配置；动态调节与 metric 暴露列入 M4 运维项。
 - 重复投递的兜底是业务幂等键（`ActorBase#idempotent`），框架不承诺 exactly-once（DESIGN 明确禁止）。
+## M3（Roster/HashRing/漂移转发/drain）：成员视图与路由实验（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="..." crystal spec
+# 99 examples, 0 failures, 0 errors, 0 pending（新增 6 例 roster/routing/drain）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 实现要点
+
+- `HashRing`：vnodes+CRC32（纯 Crystal）一致性环；节点增删只移动相邻区间键（一致性性质反例：
+  3000 键移除 1/3 节点，非死亡节点键迁移数=0）。
+- `Roster`：join（新成员 incarnation=1；死亡重入团从已移除成员的最后 incarnation 单调 +1——
+  用独立 @last_incarnation 表，判死移除后仍可递增）；heartbeat incarnation 不匹配拒绝；
+  sweep 超时判死；同/低 incarnation 重加入 → StaleIncarnationError（生产协议协商边界）。
+- `Router`：成员视图同步到环（sync! 返回 added/removed 漂移名单）；死亡节点键漂移到环上后继，
+  其他节点键不变。
+- `Stage` 优雅 drain 三段式：begin_drain（新 Call → CallRejectedError(:draining, retryable=true，
+  可漂移转发)）→ idle?（全部 slot 无排队无在途）→ finish_drain（→ :shutdown）。
+  排队/在途 Turn 照常完成（执行占用语义不变）；Manual/Fiber 双模式验证。
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| 环负载均衡 | 3 节点 3000 键：各节点份额 10%~60%（无独大） |
+| 环一致性 | 移除 1/3 节点：其他节点键迁移数=0，死亡节点键全部漂移 |
+| incarnation 协商 | 现存=1 时以 1 重加入被拒；死亡重入团 =2；同 incarnation 心跳拒绝 |
+| 判死与重入团 | 超时 sweep 移除（持续心跳者存活）；重入团 incarnation 单调 +1 |
+| 漂移转发 | Router.sync! 死亡节点移除 → 仅其键漂移到后继 |
+| drain 拒新 | begin_drain 后新 Call → :draining retryable=true |
+| drain 完成判定 | idle?=false（有排队/在途）→ 排空后 true |
+| finish 边界 | finish_drain 未排空时显式拒绝（InvalidActorStateError）；排空后 → :shutdown |
+
+### 未验证边界（不宣称）
+
+- Roster 探测为心跳超时模型，未实现 gossip/全互联探测协议与消息边界（跨进程实验留待 M4）。
+- Router 仅给出归属决策，远程 handoff（连接迁移、在途转移）未实现；漂移转发的"转发"由调用方
+  按新归属重试（:draining retryable=true 语义支撑）。
+- HashRing 用 CRC32，进程内一致；跨语言 canonical hash 待 M5 公共协议 ADR。
 ## M3（TCP transport 实验）：帧协议与服务端/客户端（2026-11-15）
 
 ### 命令与结果

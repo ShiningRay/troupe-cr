@@ -66,6 +66,9 @@ module Troupe
   # 幂等键冲突：同键不同参数指纹（docs/persistence.md 失败语义）。
   class IdempotencyConflictError < Error; end
 
+  # Roster 重加入 incarnation 不高于现存（生产协议协商）。
+  class StaleIncarnationError < Error; end
+
   # 调用了未注册的角色。
   class UnknownRoleError < Error; end
 

@@ -20,6 +20,7 @@ module Troupe
     @mutex = Mutex.new
     @call_seq : UInt64 = 0
     @closed = false
+    @draining = false
     @event_handler : Proc(::Troupe::Event, Nil)? = nil
     @trace_handler : Proc(::Troupe::TraceEvent, Nil)? = nil
     @metrics = StageMetrics.new
@@ -103,6 +104,9 @@ module Troupe
              deadline : ::Time::Span? = nil, traceparent : String? = nil) : ::Troupe::CallFuture
       @mutex.synchronize do
         raise CallRejectedError.new("Stage #{@name} 已停机，拒收新 Call", :shutdown, false) if @closed
+        if @draining
+          raise CallRejectedError.new("Stage #{@name} 排空中，拒收新 Call（漂移转发到其他节点）", :draining, true)
+        end
         manifest = @repertoire[actor_id.role]?
         unless manifest
           emit(Event.new(EventType::CallRejected, actor_id, @clock.now, method, "unknown_role"))
@@ -190,6 +194,30 @@ module Troupe
         passivated << id
       end
       passivated
+    end
+
+    # 优雅 drain（docs/cluster.md）：拒新 → 等队列与在途清空 → 关闭。
+    # begin_drain 之后新 Call 得 CallRejectedError(:draining, retryable=true，可转发其他节点)；
+    # 已入队/执行中的 Turn 照常完成（执行占用语义不变）。
+    def begin_drain : Nil
+      @mutex.synchronize { @draining = true }
+    end
+
+    def draining? : Bool
+      @mutex.synchronize { @draining }
+    end
+
+    # 所有 slot 均无排队且无执行中 Turn。
+    def idle? : Bool
+      @mutex.synchronize do
+        @slots.each_value.all? { |slot| slot.idle? }
+      end
+    end
+
+    def finish_drain : Nil
+      begin_drain
+      raise InvalidActorStateError.new("Stage #{@name} 排空未完成（仍有排队/在途 Turn），拒绝 finish") unless idle?
+      shutdown
     end
 
     def shutdown : Nil

@@ -37,7 +37,7 @@
 - [x] PostgreSQL Props/Ownership：事务、CAS、lease、单调 epoch 与 fencing。（2026-11-14：PostgreSQLPropStore/PostgreSQLOwnershipStore——acquire 单语句 RETURNING 带租期守卫、跨实例租期内拒绝可重试、同实例/过期重取 epoch 单调、renew 同 epoch 续租、fencing（epoch+租期有效期）在单条 UPDATE 的 WHERE 内原子校验、幂等记录单事务提交；`cross_node_safe? = true`；CI 以 postgres service 必跑真实 PG 用例；reminder 部分属后续项）
 - [x] 激活先 acquire 再读/迁移/写；所有旧 epoch 写拒绝。（M1 激活顺序已有反例；本轮以真实 PG 补端到端接管反例——另一节点取得所有权提交后，旧实例 save 被 fencing 拒绝并失效，重新激活从 PG 已提交快照继续）
 - [x] TCP transport 实验：长度上限、帧校验、in-flight、方法白名单、错误分类、超时/取消。（2026-11-15：`Troupe::Transport` 帧协议 magic+length+CRC32（纯 Crystal，超限读前拒绝不分配内存）、TCPServer 复用 Stage 管道（白名单/背压/超时/取消不新增语义）+ 连接级 in-flight 上限 + cancel 信封协作取消传播、TCPClient call_id 多路复用 + deadline :executing + 断连 UnknownOutcome；7 例反例；认证/TLS 另行迭代）
-- [ ] Roster/HashRing/漂移转发、生产角色与协议协商、优雅 drain。
+- [x] Roster/HashRing/漂移转发、生产角色与协议协商、优雅 drain。（2026-11-15：`Roster` 成员视图（join/heartbeat/sweep 判死，incarnation 协商——旧/同 incarnation 重入团 StaleIncarnationError 拒绝、死亡重入团单调 +1）；`HashRing` vnodes+CRC32 一致性环（增删只移动相邻区间）；`Router` 同步成员视图到环——死亡节点键漂移到后继、其他节点键不变；`Stage` 优雅 drain 三段式 begin(:draining retryable 拒新)→idle?(队列+在途清空)→finish(:shutdown)，执行占用语义不变；6 例反例。跨节点探测协议与远程 handoff 留待 M4/M5 实验）
 - [x] 持久 CueStore、归属过滤、至少一次重投与幂等。（2026-11-15：`ReminderStore` 契约 + Memory/PostgreSQL 双实现 + `ReminderRunner` 交付调度——稳定键 (actor_id, name)、payload、nextDue、claim lease、statusVersion；claim 单语句先按归属过滤（troupe_ownership 持有者，无记录任何节点可认领）再原子认领；complete/release 均 fencing（status_version+claim_holder+租期，DB 时钟判定）；交付失败 release 立即重投、认领者宕机租期过期他人重投——至少一次，重复由业务幂等兜底；9 例反例含真实 PG；volatile timer 与 durable reminder 保持分离）
 - [ ] 认证/TLS/密钥轮换方案；外部副作用 fencing/Outbox 指引。
 

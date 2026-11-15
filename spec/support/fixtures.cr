@@ -87,6 +87,32 @@ class FlakyActor < Troupe::Actor(FlakyProps)
   end
 end
 
+class Gate2Props
+  include JSON::Serializable
+  property count : Int32 = 0
+
+  def initialize
+  end
+end
+
+class Gate2Actor < Troupe::Actor(Gate2Props)
+  @@gate : Channel(Nil) = Channel(Nil).new
+
+  def self.gate
+    @@gate
+  end
+
+  def self.reset!
+    @@gate = Channel(Nil).new
+  end
+
+  def self.open!
+    @@gate.send(nil)
+  rescue
+    nil
+  end
+end
+
 class CartPropsV1
   include JSON::Serializable
   property items : Array(String) = [] of String
