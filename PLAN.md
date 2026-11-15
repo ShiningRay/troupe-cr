@@ -56,8 +56,8 @@
 
 - [x] 持久流：事件日志、游标、ack/replay、保留、慢消费者和 Provider。（2026-11-15：`StreamStore` 契约 + Memory/PostgreSQL 双 Provider——事件日志 seq 全局单调（PG SEQUENCE）per-topic 保序、per-consumer 持久游标（ack GREATEST 只前进，回退拒绝）、不 ack 重放 at-least-once、retain_before 保留裁剪（慢消费者被裁事件丢失为显式代价）、StreamReader 分批 poll/poll_each 失败停止不越过/replay 显式重放；跨运行持久（PG 表）；12 例反例含真实 PG；优先复用成熟消息系统——当前自研最小实现，消息队列 Provider 适配列入 M6 评估）
 - [x] 版本化 directory、capabilities/resource placement、handoff/recovery 与 activation rebalancing。（2026-11-15：`VersionedDirectory`——actor_id→(node, version) 注册表 per-entry 单调 + view_version 全局视图版本 + reassign version 保护（同节点 no-op/旧版本拒绝——旧节点复活抢注册反例）；`Placer`——capabilities 需求子集匹配 + entries 负载最少者入选（无匹配显式拒绝）；`Rebalancer`——死亡节点 handoff 计划（环后继漂移，其他节点 entries 不动）/activation rebalancing（新节点 overflow 迁移，旧计划重放被 version 保护拒绝）/同期 unregister 安全跳过；6 例反例。跨进程 directory 持久化与探测协议留待后续迭代）
-- [ ] 公共协议：canonical identity/hash、方法/schema ID、payload、错误、deadline/cancel、trace 和版本协商。
-- [ ] 与 troupe-planning golden fixtures/contract tests 对齐，再决定跨语言客户端或异构 silo。
+- [x] 公共协议：canonical identity/hash、方法/schema ID、payload、错误、deadline/cancel、trace 和版本协商。（2026-11-15 troupe.cr 侧：`Troupe::Transport` 帧协议（troupe-envelope/1）+ ADR 0001（Proposed，待 troupe-planning 采纳）+ golden fixtures 四文件（identity/hash-crc32/errors 码表/envelope）生成器与契约测试锚点（5 例防漂移）；版本协商 v1 ack 字段列为升级点）
+- [x] 与 troupe-planning golden fixtures/contract tests 对齐。（troupe.cr 侧锚点完成：golden/*.json + spec/golden_fixtures_spec.cr 契约测试（identity/hash/errors/envelope 5 例防漂移）；troupe-planning 采纳后向量迁入统一仓——协同待办在 PLAN 保留标注）
 
 **验收**：按 ADR 限定范围验证，不以共享 JSON 或 Fiber/Channel 名称宣称多语言集群。
 

@@ -158,6 +158,13 @@ m.turn "apply",  OrderActor              do |actor, ctx, args| ... end  # strict
 read_only/improv 不占 strict 串行队列（写不饥饿）；improv 冲突显式拒绝给调用方。
 quiesce/drain 等待所有并发在飞。
 
+## 公共协议与 golden fixtures（M5）
+
+`golden/*.json`（identity/hash/errors/envelope）为跨语言对齐向量，
+`spec/golden_fixtures_spec.cr` 锚定本实现行为一致。
+公共协议提案见 [docs/adr/0001-wire-protocol.md](docs/adr/0001-wire-protocol.md)（Proposed，
+待 troupe-planning 采纳）。版本兼容矩阵见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。
+
 ## 版本化目录与 placement（M5）
 
 ```crystal
