@@ -31,6 +31,7 @@ require "./troupe/show"
 require "./troupe/director"
 require "./troupe/stream"
 require "./troupe/stream_pg"
+require "./troupe/event_sourcing"
 require "./troupe/directory"
 require "./troupe/rehearsal"
 

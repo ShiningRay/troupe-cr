@@ -132,6 +132,17 @@ runner.start # 轮询认领 → 作为普通 Turn 交付 → 成功 complete / �
 归属过滤（仅认领本节点拥有的 actor）→ 原子 claim（租期）→ 至少一次交付
 （失败/宕机到期重投，重复由业务幂等键兜底）。volatile timer 与 durable reminder 保持分离。
 
+## 事件溯源扩展点与滚动升级（M6）
+
+```crystal
+Troupe::EventSourcing.append_event(store, "bank", "deposit", data)
+state = Troupe::EventSourcing.rebuild(BankState.new, events, &apply)
+snapshot_state = Troupe::EventSourcing.rebuild_from_snapshot(snapshot, delta_events, &apply)
+```
+
+事件为真相源：Turn append 事件 → 独立重建者状态一致（快照+增量==全量，反例覆盖）。
+滚动升级/回滚指引见 [docs/ROLLING_UPGRADE.md](docs/ROLLING_UPGRADE.md)。
+
 ## Show realtime（M4）
 
 ```crystal

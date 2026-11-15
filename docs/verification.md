@@ -245,6 +245,36 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
 
+## M6：事件溯源扩展点 / 滚动升级指引（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="..." crystal spec
+# 160 examples, 0 failures, 0 errors, 0 pending（新增 5 例事件溯源用例）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+crystal run examples/director_cli.cr（M6 前次迭代已入 CI 冒烟）
+```
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| 全量重放 | 事件顺序折叠：deposit 100 → withdraw 30 → deposit 5 = balance 75 |
+| 空事件流 | 返回初始状态（无可折叠） |
+| 快照加速一致性 | 快照(前4条)+增量(后2条) == 全量重放（balance/ops 均一致；非平凡窗口断言） |
+| 事件信封 | append_event 编码 {type, data} |
+| 事件为真相源 | Turn append 事件 → 独立重建者仅从事件流重建 → 状态一致（不读 Props） |
+| 滚动升级指引 | docs/ROLLING_UPGRADE.md：drain→升级→快照恢复流程、schema 向后兼容读要求、不自动回滚声明 |
+
+### 未验证边界（不宣称）
+
+- 事件溯源为扩展点/模式（helper + 反例），非框架默认存储路径；多流聚合投影未做。
+- 快照持久化（snapshot 表）未实现——示例为内存快照变量；持久快照列入后续。
+- ROLLING_UPGRADE 为指引文档；多节点自动编排（与 Roster 探测联动）列入 M4/M5 后续实验。
 ## M5（第二项）：版本化 directory / placement / rebalancing（2026-11-15）
 
 ### 命令与结果

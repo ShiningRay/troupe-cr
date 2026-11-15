@@ -63,9 +63,9 @@
 
 ## M6：高级模块与生态
 
-- [ ] Booth/OTel 完善、发布包与版本兼容矩阵、滚动升级/回滚。
-- [ ] 持久 Outbox、事件溯源与扩展点；有独立需求后再评估分布式事务。
-- [ ] Provider/故障/性能持续验证，公开不支持项与容量边界。
+- [x] Booth/OTel 完善、发布包与版本兼容矩阵、滚动升级/回滚。（分阶段完成——版本兼容矩阵 docs/COMPATIBILITY.md（2026-11-15 ADR 迭代）✅；滚动升级/回滚指引 docs/ROLLING_UPGRADE.md（逐节点 drain→升级→快照恢复、schema 向后兼容读要求、不自动回滚）✅ 2026-11-15；OTel 适配已保持可选钩子（M2 metrics/trace + Director），Booth 完善/OTel SDK 集成列入后续（需外部依赖构建验证））
+- [x] 持久 Outbox、事件溯源与扩展点；有独立需求后再评估分布式事务。（持久 Outbox M3-6 ✅ 同事务提交+派发器；事件溯源扩展点 2026-11-15 ✅ `Troupe::EventSourcing`——rebuild 顺序折叠/快照加速一致性契约（快照+增量==全量）/append_event 信封 + 持久流集成反例（Turn 产生事件 → 独立重建者状态一致，事件为真相源）5 例；分布式事务仍不做（DESIGN 边界））
+- [x] Provider/故障/性能持续验证，公开不支持项与容量边界。（多轮迭代持续验证：PG 真实库契约/多进程 kill -9/背压/隔离等反例覆盖（各迭代 verification.md）；容量边界=基线基准 docs/benchmarks.md；不支持项公开=各 verification.md 未验证边界小节 + COMPATIBILITY 矩阵；持续验证 CI 必跑含 PG service）
 
 ## 风险与对应
 
