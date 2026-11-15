@@ -276,9 +276,24 @@ crystal build src/troupe.cr --no-codegen
 | 幂等原子提交 | revision 冲突 → 单事务回滚，记录不落盘；成功则同事务生效 |
 | Stage 端到端接管 | A 节点激活写入 → 租期过期后 B 节点 acquire 并提交 count=50 → A 的旧实例 save 被 fencing 拒绝失效 → 重新激活从 PG 已提交快照继续（51） |
 
+### 多进程故障注入（M3 验收核心，2026-11-14 补）
+
+程序：spec/support/pg_worker.cr（独立进程 worker）+ spec/postgresql_multiprocess_spec.cr；
+worker 由 spec 编译为 `.crystal/pg_worker` 后作为真实子进程 spawn（6 个进程参与全流程）。
+全套 77 examples（含 PG 用例与多进程用例），0 failures。
+
+| 步骤 | 结果 |
+|---|---|
+| 三独立进程并存 | A（hold+renew 循环持锁）；B、C 同时 acquire 显式拒绝 |
+| kill -9 | A 被 TerminateProcess（graceful: false，POSIX 为 SIGKILL）强杀，无 graceful 释放 |
+| 接管 | 租期过期（DB 时钟判定）后新进程 D 轮询 acquire 成功（epoch 单调），写入 count=42 revision=2 |
+| 无双活 | D 持租期间进程 E acquire 被拒——同一时刻仅一个 owner 可写 |
+| 已提交快照 | 全新进程 F 读到 D 的提交（count=42，rev 2） |
+| 跨进程幂等 | 进程实例 A 写入幂等记录 → 全新独立实例 B 读同键命中可重放（记录与 Props 同事务持久） |
+
 ### 未验证边界（不宣称）
 
-- PLAN M3 验收中的"至少三个独立 Crystal 进程 + 扩容/kill -9/冻结恢复"完整故障注入矩阵尚未执行（本轮以同进程双实例模拟接管路径，真实多进程/kill -9 用例列入后续 M3 迭代）。
+- "扩容"（容量均衡放置）与"冻结恢复"（suspend/整节点暂停）用例未单独构造；kill -9 + lease 过期已覆盖最硬的接管路径，扩容/冻结随 Roster/drain 项一起验收。
 - Reminder（持久 CueStore）不在本迭代（PLAN M3 后续项）。
 - PG 用例需要 `TROUPE_PG_URL`；本地未起容器时自动 pending（CI 必跑）。
 - acquire 的租期守卫不主动抢占：被拒方需等租期过期后重试（retryable=true），主动探测/续租心跳列入后续调度循环集成。
