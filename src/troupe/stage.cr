@@ -99,6 +99,15 @@ module Troupe
       @mutex.synchronize { @repertoire.keys }
     end
 
+    # 观测：slot（激活槽）总数与 Running（已激活）数。
+    def slot_count : Int32
+      @mutex.synchronize { @slots.size }
+    end
+
+    def actor_count : Int32
+      @mutex.synchronize { @slots.values.count { |s| s.state_snapshot == SlotState::Running } }
+    end
+
     # 位置透明的本地调用入口（M1 全部本地；远程 transport 复用同一语义管道，见 docs/cluster.md）。
     # 注意：slot.enqueue 必须在 stage 锁外调用——Manual 模式并发 turn 会在 enqueue 内
     # 同步执行（可能阻塞），持锁执行会死锁全部 Stage 操作。

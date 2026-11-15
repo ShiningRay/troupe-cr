@@ -245,6 +245,37 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
 
+## M4（第四项）：Director / 健康与指标端点（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="..." crystal spec
+# 132 examples, 0 failures, 0 errors, 0 pending（新增 5 例 Director 用例）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+crystal run examples/director_cli.cr
+# CLI 演示冒烟（health/metrics/events 输出 + 演示故障可见）
+```
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| health 生命周期 | running → draining → closed 状态迁移可见；全部关闭 ok=false |
+| 故障可见 | activation_failures/save_failures/turns_expired/turns_failed 计数正确；recent_events 含 SaveFailed/ActivationFailed/TurnExpired 条目 |
+| HTTP 端点 | /health /metrics /events 200 JSON；未知路径 404 |
+| 管理操作 | drain_stage/shutdown_stage 生效；未知 Stage 返回 nil |
+| 环形上限 | event_limit=5 时 10 个 Turn 后 recent_events 恰 5 条（内存有界） |
+| CLI | examples/director_cli.cr 冒烟：health/metrics/events 输出含演示故障 |
+
+### 未验证边界（不宣称）
+
+- HTTP 端点无认证/TLS（生产暴露需叠加反向代理或叠加 M3 认证方案迭代）；
+- 管理写操作（drain/shutdown）仅进程内 API，不经 HTTP；
+- 事件环形样本固定 200 条，不可配置持久化。
 ## M4（第三项）：Show 跨 Stage / 订阅生命周期 / 背压（2026-11-15）
 
 ### 命令与结果

@@ -48,7 +48,7 @@
 - [x] 在 strict 核心稳定后引入 ReadOnly 快照并发和显式 Improv 规则；写饥饿/quiesce 反例。（2026-11-15：`Manifest#turn(mode:)` 三类调度——strict 串行独占（默认）/ read_only 并发已提交快照（禁写，save 显式拒绝 InvalidActorStateError）/ improv 并发可写副本（save 以激活时 revision CAS，冲突显式 ConflictError 拒绝，禁止隐式覆盖）；写饥饿反例（长只读阻塞期间 strict 立即完成）与 quiesce 反例（drain/idle 等待并发在飞，漏计即挂）；7 例反例，Manual/Fiber 双模式）
 - [x] Show realtime：Actor Audience 经完整 Turn，边界回调与 Actor 订阅分离。（2026-11-15：`ShowHub`/`Show`/`PublishReport`——Actor Audience 经同一 Stage 管道交付为普通 Turn（白名单/串行/持久化语义不变），边界回调直接通知且异常隔离；在线尽力放弃不重投（持久化走 Reminder/Outbox）；退订/多 topic/背压放弃/未订阅全零报告均有反例；8 例）
 - [x] Show 跨 Stage、订阅生命周期和背压；明确在线尽力通知，离线不保证。（2026-11-15：`actor_subscribe` 支持显式绑定 Stage——同一 topic 的 Audience 可跨 Stage（交付按各自订阅的 Stage 进行）；订阅生命周期——Stage 停机/排空(:shutdown/:draining)的订阅交付计入 failed（离线不保证，:draining 可漂移转发）；背压隔离——慢订阅者（队列满）failed 不影响其他订阅者照常收到；5 例反例）
-- [ ] Director/CLI/基础健康与指标端点，故障与未知结果可见。
+- [x] Director/CLI/基础健康与指标端点，故障与未知结果可见。（2026-11-15：`Director`——health（生命周期状态 running/draining/closed）+ metrics（per-Stage 计数含 activation_failures/save_failures/turns_expired/turns_failed）+ recent_events 环形样本（上限 200，内存有界反例）+ drain/shutdown 管理操作；`HTTPEndpoint`——stdlib HTTP::Server 零依赖（/health /metrics /events，管理写操作不经 HTTP）；examples/director_cli.cr CLI 演示（CI 冒烟）；5 例反例）
 
 **验收**：交错组合矩阵、无写饥饿、慢订阅者不耗尽全局内存；不将 Show 称为持久流。
 

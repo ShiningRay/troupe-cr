@@ -158,6 +158,18 @@ m.turn "apply",  OrderActor              do |actor, ctx, args| ... end  # strict
 read_only/improv 不占 strict 串行队列（写不饥饿）；improv 冲突显式拒绝给调用方。
 quiesce/drain 等待所有并发在飞。
 
+## Director 与健康端点（M4）
+
+```crystal
+director = Troupe::Director.new
+director.add_stage("main", stage)
+endpoint = Troupe::HTTPEndpoint.new(director, "127.0.0.1", 0)
+port = endpoint.listen            # GET /health /metrics /events
+director.metrics["main"]["turns_failed"]   # 故障与未知结果可见
+```
+
+CLI 演示：`crystal run examples/director_cli.cr`。
+
 ## 成员视图与路由（M3）
 
 ```crystal
