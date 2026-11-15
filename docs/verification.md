@@ -245,6 +245,33 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
 
+## M4（第三项）：Show 跨 Stage / 订阅生命周期 / 背压（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="..." crystal spec
+# 127 examples, 0 failures, 0 errors, 0 pending（新增 5 例跨 Stage 用例）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| 跨 Stage Audience | 同一 topic 订阅者来自两个 Stage：publish 各自交付（两 Stage props 均更新） |
+| 订阅生命周期（停机） | Stage 停机后其订阅交付失败（:shutdown → 离线不保证）；其他 Stage 照常 |
+| 订阅生命周期（排空） | draining Stage 的订阅交付失败（:draining 可漂移转发给调用方） |
+| 背压隔离 | 慢订阅者（Manual+队列深度 1 确定性满队）failed；快订阅者同 publish 照常收到 |
+| 退订幂等 | 重复退订/未知 actor 退订返回 false |
+
+### 未验证边界（不宣称）
+
+- publish 仍为同步顺序 fan-out；并发交付与 per-subscriber 并发预算属后续 Show 背压深化。
+- 慢订阅者背压反例使用 Manual Stage（确定性满队）；Fiber Stage 的队列时序由背压语义自然覆盖。
 ## M4（第二项）：Show realtime（2026-11-15）
 
 ### 命令与结果

@@ -2,18 +2,6 @@ require "./spec_helper"
 
 # PLAN M4 第二项：Show realtime——Actor Audience 经完整 Turn，边界回调与 Actor 订阅分离
 # （在线尽力通知，离线不保证；不重投——持久化诉求走 Reminder/Outbox）。
-class FeedProps
-  include JSON::Serializable
-  property received : Int32 = 0
-  property last_topic : String = ""
-
-  def initialize
-  end
-end
-
-class FeedActor < Troupe::Actor(FeedProps)
-end
-
 def show_setup(mode : Troupe::SchedulerMode = Troupe::SchedulerMode::Fiber,
                max_queue_depth : Int32 = 64)
   stage = Troupe::Stage.new(mode: mode, config: Troupe::StageConfig.new(max_queue_depth: max_queue_depth))

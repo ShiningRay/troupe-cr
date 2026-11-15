@@ -12,7 +12,7 @@ module Troupe
   # publish 同步 fan-out，返回 PublishReport（交付计数可断言）。
   record PublishReport, actors_ok : Int32, actors_failed : Int32, external_ok : Int32, external_failed : Int32
 
-  record ActorSubscription, actor_id : ::Troupe::ActorId, turn : String
+  record ActorSubscription, stage : ::Troupe::Stage, actor_id : ::Troupe::ActorId, turn : String
 
   class Show
     @stage : ::Troupe::Stage
@@ -27,8 +27,11 @@ module Troupe
     end
 
     # Actor Audience：事件作为普通 Turn 交付到 (actor_id, turn)。
-    def actor_subscribe(actor_id : ::Troupe::ActorId, turn : String) : Nil
-      @mutex.synchronize { @actor_subs[actor_id] = ActorSubscription.new(actor_id, turn) }
+    # stage 缺省为 Hub 默认 Stage；显式传入可实现**跨 Stage** Audience
+    # （同一 topic 的订阅者可来自不同 Stage，交付按各自订阅的 Stage 进行）。
+    def actor_subscribe(actor_id : ::Troupe::ActorId, turn : String,
+                        stage : ::Troupe::Stage = @stage) : Nil
+      @mutex.synchronize { @actor_subs[actor_id] = ActorSubscription.new(stage, actor_id, turn) }
     end
 
     def actor_unsubscribe(actor_id : ::Troupe::ActorId) : Bool
@@ -69,10 +72,12 @@ module Troupe
       actors_failed = 0
       subs.each do |sub|
         begin
-          @stage.call(sub.actor_id, sub.turn, envelope, @delivery_deadline).await
+          sub.stage.call(sub.actor_id, sub.turn, envelope, @delivery_deadline).await
           actors_ok += 1
         rescue e : ::Exception
-          actors_failed += 1 # 在线尽力：放弃该次通知，不重投（实时语义）
+          # 在线尽力：放弃该次通知，不重投（实时语义）。
+          # Stage 停机/排空(:shutdown/:draining)与背压/超时同样计入 failed——离线不保证。
+          actors_failed += 1
         end
       end
 
@@ -91,7 +96,8 @@ module Troupe
     end
   end
 
-  # 多 topic 的 Show 集合管理（同一 Stage）。
+  # 多 topic 的 Show 集合管理。默认 Stage 供一般订阅；跨 Stage Audience
+  # 经 `show(topic).actor_subscribe(id, turn, other_stage)` 显式绑定。
   class ShowHub
     @stage : ::Troupe::Stage
     @shows = Hash(String, ::Troupe::Show).new
@@ -105,6 +111,11 @@ module Troupe
       @mutex.synchronize do
         @shows[topic] ||= Show.new(@stage, topic, @delivery_deadline)
       end
+    end
+
+    def actor_subscribe(topic : String, actor_id : ::Troupe::ActorId, turn : String,
+                        stage : ::Troupe::Stage? = nil) : Nil
+      show(topic).actor_subscribe(actor_id, turn, stage || @stage)
     end
 
     def publish(topic : String, payload : ::JSON::Any) : ::Troupe::PublishReport

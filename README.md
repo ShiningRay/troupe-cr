@@ -142,6 +142,9 @@ report = hub.publish("events", payload)              # 在线尽力：失败放�
 ```
 
 两类订阅分离；Actor 交付经同一 Stage 管道（串行/白名单/背压不变）。
+跨 Stage Audience：`actor_subscribe(id, turn, other_stage)` 显式绑定 Stage；
+订阅生命周期——Stage 停机/排空的交付计入 failed（离线不保证）；
+慢订阅者背压隔离（不影响其他订阅者）。
 持久化诉求走 Reminder/Outbox——不把 realtime fan-out 称为持久流。
 
 ## 调度模式（M4）

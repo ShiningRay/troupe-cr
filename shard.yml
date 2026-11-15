@@ -1,5 +1,5 @@
 name: troupe
-version: 0.15.0-dev.0
+version: 0.16.0-dev.0
 description: Troupe Virtual Actor framework for Crystal — M1 core + M2 + M3 PostgreSQL provider
 license: MIT
 crystal: ">= 1.22"

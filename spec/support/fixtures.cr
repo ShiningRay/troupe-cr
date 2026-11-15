@@ -321,3 +321,15 @@ module TroupeFixtures
     end)
   end
 end
+
+class FeedProps
+  include JSON::Serializable
+  property received : Int32 = 0
+  property last_topic : String = ""
+
+  def initialize
+  end
+end
+
+class FeedActor < Troupe::Actor(FeedProps)
+end
