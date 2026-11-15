@@ -96,7 +96,8 @@ class Gate2Props
 end
 
 class Gate2Actor < Troupe::Actor(Gate2Props)
-  @@gate : Channel(Nil) = Channel(Nil).new
+  # 缓冲 8 令牌：open! 早于 turn 到达时令牌可等待
+  @@gate : Channel(Nil) = Channel(Nil).new(8)
 
   def self.gate
     @@gate

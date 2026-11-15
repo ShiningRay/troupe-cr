@@ -245,6 +245,37 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
 
+## M4（首项）：ReadOnly 快照并发 + 显式 Improv 规则（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="..." crystal spec
+# 114 examples, 0 failures, 0 errors, 0 pending（新增 7 例 M4 用例）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| read_only 并发通道 | 长只读阻塞期间，后续只读与 strict 写经并发通道立即完成（写饥饿反证：2s deadline 内完成） |
+| 只读快照 | read_only 看到已提交状态；save 显式拒绝（InvalidActorStateError），零写入 |
+| improv 显式冲突 | 阻塞窗口期间 strict 推进 revision → save CAS 失败 → ConflictError 给 improv 调用方；最终状态 = strict 的值（无隐式覆盖） |
+| improv 无冲突 | gate 放行后 CAS 成功提交（count 5） |
+| quiesce | Manual：并发在飞（gate 阻塞）时 idle?=false → 放行 → idle?=true → finish_drain；漏计并发在飞即挂 |
+| turn mode 协商 | turn_mode(method) 驱动分流；strict 默认不变（既有 99 例回归全绿） |
+| 宏支持 | troupe_manifest turn 声明 `mode: :read_only/:improv` 透传 |
+
+### 未验证边界（不宣称）
+
+- read_only 快照读取为 store 单条读（不含未提交 strict 状态）；多快照间的顺序无保证。
+- improv 冲突策略为"显式拒绝"（DESIGN 禁止隐式覆盖）；合并/多写冲突解决留待 ADR。
+- 并发 read_only 的数量上限暂复用 max_activations 语义（slot 级 in-flight 计数）；独立预算列入 M4 后续。
+- Fiber 模式并发重叠的 peak 计数反例因 Windows fiber 调度时序不稳定，以"阻塞期间后续完成"的时序断言替代（等价并发性证明）。
 ## M3（认证/轮换/Outbox）：安全与外部副作用（2026-11-15）
 
 ### 命令与结果

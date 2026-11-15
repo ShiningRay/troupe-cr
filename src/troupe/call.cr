@@ -26,10 +26,11 @@ module Troupe
     getter cancel : ::Troupe::CancelSignal
     getter traceparent : String
     getter parent_traceparent : String?
+    getter mode : ::Symbol
 
     def initialize(@call_id : UInt64, @method : String, @args : ::JSON::Any, @deadline : ::Time,
                    @reply : Channel(::Troupe::CallReply), @bytes : Int32, @cancel : ::Troupe::CancelSignal,
-                   @traceparent : String, @parent_traceparent : String?)
+                   @traceparent : String, @parent_traceparent : String?, @mode : ::Symbol = :strict)
     end
   end
 

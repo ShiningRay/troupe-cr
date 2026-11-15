@@ -64,6 +64,8 @@ macro troupe_manifest(role_name, schema_version = 1, &block)
           {% args_node = stmt.args[1] %}
           {% arg_pairs = args_node.is_a?(NamedTupleLiteral) ? args_node.to_a : (args_node.is_a?(HashLiteral) && args_node.empty? ? [] of ASTNode : raise "turn #{turn_name} 的参数须为 {name: Type} 命名字面量或空 {} of String => String") %}
           {% returns_node = stmt.named_args.find { |na| na.name == "returns" }.value %}
+          {% mode_node = stmt.named_args.find { |na| na.name == "mode" } %}
+          {% mode_src = mode_node ? mode_node.value.stringify : nil %}
           {% schema_pairs = [] of String %}
           {% call_args = [] of String %}
           {% for pair in arg_pairs %}
@@ -76,7 +78,7 @@ macro troupe_manifest(role_name, schema_version = 1, &block)
             {% schema_pairs << "\"" + k.id.stringify + "\" => \"" + t_str + (optional ? "?" : "") + "\"" %}
             {% call_args << "__v_" + k.id.stringify %}
           {% end %}
-          m.turn_with_schema({{ @type.name.id }}, {{ turn_name.id.stringify }}, { {{ schema_pairs.join(", ").id }} } of ::String => ::String) do |actor, ctx, args|
+          m.turn_with_schema({{ @type.name.id }}, {{ turn_name.id.stringify }}, { {{ schema_pairs.join(", ").id }} } of ::String => ::String{% if mode_src %}, {{ mode_src.id }}{% end %}) do |actor, ctx, args|
             {% for pair in args_node.to_a %}
               {% k = pair.first %}
               {% v = pair.last %}

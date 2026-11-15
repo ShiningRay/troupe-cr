@@ -45,7 +45,7 @@
 
 ## M4：调度扩展与实时 Show
 
-- [ ] 在 strict 核心稳定后引入 ReadOnly 快照并发和显式 Improv 规则；写饥饿/quiesce 反例。
+- [x] 在 strict 核心稳定后引入 ReadOnly 快照并发和显式 Improv 规则；写饥饿/quiesce 反例。（2026-11-15：`Manifest#turn(mode:)` 三类调度——strict 串行独占（默认）/ read_only 并发已提交快照（禁写，save 显式拒绝 InvalidActorStateError）/ improv 并发可写副本（save 以激活时 revision CAS，冲突显式 ConflictError 拒绝，禁止隐式覆盖）；写饥饿反例（长只读阻塞期间 strict 立即完成）与 quiesce 反例（drain/idle 等待并发在飞，漏计即挂）；7 例反例，Manual/Fiber 双模式）
 - [ ] Show realtime：Actor Audience 经完整 Turn，边界回调与 Actor 订阅分离。
 - [ ] Show 跨 Stage、订阅生命周期和背压；明确在线尽力通知，离线不保证。
 - [ ] Director/CLI/基础健康与指标端点，故障与未知结果可见。

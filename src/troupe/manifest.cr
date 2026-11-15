@@ -62,6 +62,7 @@ module Troupe
     @initial : Proc(P)? = nil
     @migrations = [] of ::Troupe::MigrationStepBase
     @turns = Hash(String, Proc(::Troupe::Actor(P), ::Troupe::CallContext, ::JSON::Any, ::JSON::Any)).new
+    @turn_modes = Hash(String, ::Symbol).new
     @turn_schemas = Hash(String, Hash(::String, ::String)).new
     @factory : Proc(::Troupe::ActorId, P, ::Troupe::ActivationContext, ::Troupe::ActorBase)
 
@@ -103,10 +104,17 @@ module Troupe
     end
 
     # 注册 Turn：白名单键即方法名；actor 参数按注册时提供的具体类绑定。
-    def turn(name : String, actor_type : A.class, &block : A, ::Troupe::CallContext, ::JSON::Any -> ::JSON::Any) forall A
+    # mode（PLAN M4）：:strict（默认，串行独占）/ :read_only（并发只读快照，禁写）/
+    # :improv（并发可写副本，save 以激活时 revision CAS——冲突显式拒绝，禁止隐式覆盖）。
+    def turn(name : String, actor_type : A.class, mode : ::Symbol = :strict,
+             &block : A, ::Troupe::CallContext, ::JSON::Any -> ::JSON::Any) forall A
       if RESERVED_TURNS.includes?(name) || @turns.has_key?(name)
         raise ArgumentError.new("turn #{name.inspect} 与保留名或已注册方法冲突（角色 #{role}）")
       end
+      unless [:strict, :read_only, :improv].includes?(mode)
+        raise ArgumentError.new("turn #{name.inspect} 的 mode #{mode.inspect} 不支持（strict/read_only/improv）")
+      end
+      @turn_modes[name] = mode
       @turns[name] = ->(actor : ::Troupe::Actor(P), ctx : ::Troupe::CallContext, args : ::JSON::Any) {
         block.call(actor.as(A), ctx, args)
       }
@@ -114,11 +122,13 @@ module Troupe
 
     # 注册带参数 schema 的 Turn（troupe_manifest 宏使用；语义与 turn 完全一致）。
     def turn_with_schema(actor_type : A.class, name : String, schema : Hash(::String, ::String),
+                         mode : ::Symbol = :strict,
                          &block : A, ::Troupe::CallContext, ::JSON::Any -> ::JSON::Any) forall A
       if RESERVED_TURNS.includes?(name) || @turns.has_key?(name)
         raise ArgumentError.new("turn #{name.inspect} 与保留名或已注册方法冲突（角色 #{role}）")
       end
       @turn_schemas[name] = schema
+      @turn_modes[name] = mode
       @turns[name] = ->(actor : ::Troupe::Actor(P), ctx : ::Troupe::CallContext, args : ::JSON::Any) {
         block.call(actor.as(A), ctx, args)
       }
@@ -126,6 +136,11 @@ module Troupe
 
     def turn_names : Array(String)
       @turns.keys
+    end
+
+    # Turn 调度类别（:strict/:read_only/:improv）；未注册方法返回 :strict（白名单先行拒绝）。
+    def turn_mode(method : String) : ::Symbol
+      @turn_modes[method]? || :strict
     end
 
     def initial_json : String

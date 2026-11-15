@@ -132,6 +132,17 @@ runner.start # 轮询认领 → 作为普通 Turn 交付 → 成功 complete / �
 归属过滤（仅认领本节点拥有的 actor）→ 原子 claim（租期）→ 至少一次交付
 （失败/宕机到期重投，重复由业务幂等键兜底）。volatile timer 与 durable reminder 保持分离。
 
+## 调度模式（M4）
+
+```crystal
+m.turn "query", OrderActor, :read_only do |actor, ctx, args| ... end  # 并发只读快照（禁写）
+m.turn "merge",  OrderActor, :improv     do |actor, ctx, args| ... end  # 并发可写副本+CAS（冲突显式拒绝）
+m.turn "apply",  OrderActor              do |actor, ctx, args| ... end  # strict 串行（默认）
+```
+
+read_only/improv 不占 strict 串行队列（写不饥饿）；improv 冲突显式拒绝给调用方。
+quiesce/drain 等待所有并发在飞。
+
 ## 成员视图与路由（M3）
 
 ```crystal

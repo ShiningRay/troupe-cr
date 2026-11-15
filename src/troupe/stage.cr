@@ -100,9 +100,13 @@ module Troupe
     end
 
     # 位置透明的本地调用入口（M1 全部本地；远程 transport 复用同一语义管道，见 docs/cluster.md）。
+    # 注意：slot.enqueue 必须在 stage 锁外调用——Manual 模式并发 turn 会在 enqueue 内
+    # 同步执行（可能阻塞），持锁执行会死锁全部 Stage 操作。
     def call(actor_id : ::Troupe::ActorId, method : String, args : ::JSON::Any = ::JSON::Any.new(nil),
              deadline : ::Time::Span? = nil, traceparent : String? = nil) : ::Troupe::CallFuture
-      @mutex.synchronize do
+      pending_slot : ::Troupe::ActorSlot? = nil
+      pending_request : ::Troupe::TurnRequest? = nil
+      pending_slot, pending_request = @mutex.synchronize do
         raise CallRejectedError.new("Stage #{@name} 已停机，拒收新 Call", :shutdown, false) if @closed
         if @draining
           raise CallRejectedError.new("Stage #{@name} 排空中，拒收新 Call（漂移转发到其他节点）", :draining, true)
@@ -131,21 +135,27 @@ module Troupe
         bytes = method.bytesize + args.to_json.bytesize + @config.queue_overhead_bytes
         turn_traceparent = TraceContext.child_span(traceparent)
         request = TurnRequest.new(@call_seq, method, args, deadline_at, Channel(CallReply).new(1), bytes,
-          CancelSignal.new, turn_traceparent, TraceContext.valid?(traceparent) ? traceparent : nil)
+          CancelSignal.new, turn_traceparent, TraceContext.valid?(traceparent) ? traceparent : nil,
+          manifest.turn_mode(method))
+        pending_request = request
         slot = @slots[actor_id]?
         unless slot
           slot = ActorSlot.new(actor_id, manifest, @store, @ownership, @clock, @config, @mode,
             ->(e : ::Troupe::Event) { emit(e) }, ->(t : ::Troupe::TraceEvent) { emit_trace(t) })
           @slots[actor_id] = slot
         end
-        begin
-          slot.enqueue(request)
-        rescue e : CallRejectedError
-          emit(Event.new(EventType::CallRejected, actor_id, now, method, e.message))
-          raise e
-        end
-        CallFuture.new(request, @clock, @mode == SchedulerMode::Manual)
+        pending_slot = slot
+        {pending_slot, pending_request}
       end
+      slot = pending_slot.not_nil!
+      request = pending_request.not_nil!
+      begin
+        slot.enqueue(request)
+      rescue e : CallRejectedError
+        emit(Event.new(EventType::CallRejected, actor_id, @clock.now, method, e.message))
+        raise e
+      end
+      CallFuture.new(request, @clock, @mode == SchedulerMode::Manual)
     end
 
     # Manual 模式：处理某 Actor 至多一个 Turn，返回 :executed / :empty。

@@ -34,8 +34,12 @@ Fiber 只提供轻量调度，不提供强制隔离。阻塞 C 扩展、CPU 密�
 ## Props 一致性
 
 - strict 是默认且唯一允许直接提交状态变更的模式。
-- ReadOnly 后续可并发执行只读快照，不写 Props。
-- Improv 后续若支持，必须选择并显式实现冲突检测/合并/CAS 语义；不能默认完成序整 Props 覆盖。
+- ReadOnly：并发执行只读快照，不写 Props。实现状态（M4）：`turn(name, T, :read_only)`
+  在**已提交快照**的影子 actor 上并发执行（不占 strict 串行队列——写不饥饿），
+  save 显式拒绝（InvalidActorStateError）；quiesce/drain 计入并发在飞。
+- Improv：并发可写副本 + 激活时 revision CAS。实现状态（M4）：`turn(name, T, :improv)`
+  以快照 revision 走既有 save CAS——期间 strict 推进则 ConflictError 显式拒绝给调用方
+  （禁止隐式覆盖）；无冲突则正常提交。确定性反例（gate 窗口）覆盖冲突与成功两路径。
 - 内存 Props 与调用参数需要不可变快照或受控复制，避免 Fiber 间共享可变引用。
 
 ## 调度验证

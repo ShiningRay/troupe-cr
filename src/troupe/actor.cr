@@ -12,12 +12,16 @@ module Troupe
     getter idempotency : Hash(String, ::Troupe::IdempotencyRecord)
     getter idempotency_retention : ::Time::Span
     getter outbox : Hash(String, ::Troupe::OutboxRecord)
+    # read_only 影子 ctx 为 false：save 显式拒绝（PLAN M4 ReadOnly 不写 Props）。
+    # improv 影子 ctx 为 true 但 revision 固定为激活时快照——save 走 CAS，冲突显式拒绝。
+    getter writable : Bool
 
     def initialize(@store : ::Troupe::PropStore, @manifest : ::Troupe::ManifestBase,
                    @clock : ::Troupe::Clock, @epoch : UInt64, @revision : UInt64,
                    @idempotency : Hash(String, ::Troupe::IdempotencyRecord),
                    @idempotency_retention : ::Time::Span,
-                   @outbox : Hash(String, ::Troupe::OutboxRecord) = {} of ::String => ::Troupe::OutboxRecord)
+                   @outbox : Hash(String, ::Troupe::OutboxRecord) = {} of ::String => ::Troupe::OutboxRecord,
+                   @writable : Bool = true)
     end
   end
 
@@ -30,6 +34,9 @@ module Troupe
     # 显式持久化：以 expectedRevision + epoch 原子 CAS 提交当前 Props 与幂等记录。
     # 失败（CAS 冲突 / fencing 拒绝）会使实例失效：后续调用从最后已提交快照重新激活。
     def save : Nil
+      unless @ctx.writable
+        raise InvalidActorStateError.new("read_only Turn 不允许修改 Props（快照只读，PLAN M4）")
+      end
       record = @ctx.store.write(actor_id, @ctx.revision, @ctx.manifest.schema_version, @props.to_json,
         @ctx.epoch, @ctx.idempotency.values, @ctx.outbox.values)
       @ctx.revision = record.revision

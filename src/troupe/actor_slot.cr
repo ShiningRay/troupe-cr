@@ -36,6 +36,7 @@ module Troupe
     @ctx : ::Troupe::ActivationContext? = nil
     @last_activity : ::Time
     @executing = false
+    @concurrent_inflight = 0
     @closed = false
 
     getter actor_id : ::Troupe::ActorId
@@ -51,12 +52,74 @@ module Troupe
     end
 
     def enqueue(request : ::Troupe::TurnRequest) : Nil
+      concurrent = request.mode != :strict
       @mutex.synchronize do
         raise CallRejectedError.new("Actor #{@actor_id} 已关闭，拒收新 Call", :shutdown, false) if @closed
-        @board.push(request)
+        if concurrent
+          @concurrent_inflight += 1 # quiesce/drain 判定包含并发只读/improv 在飞
+        else
+          @board.push(request)
+          @last_activity = @clock.now
+        end
+      end
+      if concurrent
+        launch_concurrent(request)
+      else
+        signal
+      end
+    end
+
+    # PLAN M4：read_only/improv 并发通道——不占 strict 串行队列（写不饥饿），
+    # 在**已提交快照**上执行（影子 actor）；read_only 禁写，improv save 走
+    # 激活时 revision CAS（冲突显式拒绝，禁止隐式覆盖）。
+    private def launch_concurrent(request : ::Troupe::TurnRequest) : Nil
+      if @mode == SchedulerMode::Manual
+        execute_concurrent(request) # 确定性：调用方同 Fiber 同步执行
+      else
+        spawn(name: "troupe-ro-#{@actor_id}") do
+          execute_concurrent(request)
+        end
+      end
+    end
+
+    private def execute_concurrent(request : ::Troupe::TurnRequest) : Nil
+      started = @clock.now
+      begin
+        actor, ctx = ensure_activated
+        # 已提交快照：read_only/improv 看到最新提交状态（不含未提交 strict 状态）
+        snapshot = @store.read(@actor_id).not_nil!
+        shadow_props = @manifest.parse_final(snapshot.data)
+        shadow_ctx = ActivationContext.new(@store, @manifest, @clock,
+          ctx.epoch, snapshot.revision,
+          Hash(String, ::Troupe::IdempotencyRecord).new, @config.idempotency_retention,
+          Hash(String, ::Troupe::OutboxRecord).new, request.mode != :read_only)
+        shadow_actor = @manifest.build_actor(@actor_id, shadow_props, shadow_ctx)
+        @emit.call(Event.new(EventType::TurnStarted, @actor_id, started, request.method, "concurrent"))
+        value = @manifest.invoke_turn(shadow_actor, CallContext.new(request.call_id, actor_id,
+          request.method, request.deadline, @clock, request.cancel, request.traceparent), request.method, request.args)
+        settled = @clock.now
+        request.reply.send(CallReply.value(value, settled))
+        @emit.call(Event.new(EventType::TurnEnded, @actor_id, settled, request.method, "ok"))
+        @emit_trace.call(TraceEvent.new(call_id: request.call_id, actor_id: @actor_id, method: request.method,
+          duration: settled - started, ok: true, outcome: "completed",
+          traceparent: request.traceparent, at: settled))
+        finish_concurrent(request)
+      rescue e : ::Exception
+        settled = @clock.now
+        request.reply.send(CallReply.error(e, settled))
+        @emit.call(Event.new(EventType::TurnEnded, @actor_id, settled, request.method, "error"))
+        @emit_trace.call(TraceEvent.new(call_id: request.call_id, actor_id: @actor_id, method: request.method,
+          duration: settled - started, ok: false, outcome: "failed",
+          traceparent: request.traceparent, at: settled))
+        finish_concurrent(request)
+      end
+    end
+
+    private def finish_concurrent(request : ::Troupe::TurnRequest) : Nil
+      @mutex.synchronize do
+        @concurrent_inflight -= 1
         @last_activity = @clock.now
       end
-      signal
     end
 
     # Manual 模式：先清队首过期请求，再执行至多一个未过期 Turn。
@@ -87,10 +150,10 @@ module Troupe
       @mutex.synchronize { @last_activity }
     end
 
-    # 无排队且无执行中 Turn（drain 完成判定用）。
+    # 无排队、无执行中 strict Turn、无并发 read_only/improv 在飞（quiesce/drain 完成判定）。
     def idle? : Bool
       @mutex.synchronize do
-        !@executing && @board.empty?
+        !@executing && @board.empty? && @concurrent_inflight == 0
       end
     end
 
