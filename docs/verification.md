@@ -245,6 +245,35 @@ CPU 阻塞 victim 120.0ms ≈ spin 全长（协作式调度停顿量化，对照
 - CPU 阻塞场景量化了协作式调度停顿（结构性边界，非缺陷）；外置 CPU worker 方案待后续评估。
 - 基准数字随环境波动，仅同一环境内的趋势对比有意义；CI 只跑 `--quick` 冒烟（不校验数字）。
 
+## M5（第二项）：版本化 directory / placement / rebalancing（2026-11-15）
+
+### 命令与结果
+
+```sh
+TROUPE_PG_URL="..." crystal spec
+# 150 examples, 0 failures, 0 errors, 0 pending（新增 6 例 directory 用例）
+crystal tool format --check src spec
+# 通过
+crystal build src/troupe.cr --no-codegen
+# 通过
+```
+
+### 已验证语义（含反例）
+
+| 语义 | 反例/验收 |
+|---|---|
+| 版本化注册 | per-entry version 单调（重新注册 +1）；view_version 全局随变更递增；注销幂等且推进视图 |
+| version 保护（handoff/recovery） | reassign 仅当现版本匹配才改派——旧节点复活以旧 expected_version 抢注册被拒，归属不被覆盖 |
+| capabilities placement | 需求子集匹配（orders+mem:big → big-a）；负载最少者入选（big-a 2 entries vs small-b 0 → small-b）；无匹配 → nil |
+| handoff 漂移一致 | 节点 c 死亡：其 entries 迁移到环后继（a/b），其他节点 entries 不动（20 键反例） |
+| activation rebalancing | 新节点加入 → overflow 3/6 迁移；旧计划重放被 version 保护拒绝（同节点 no-op 改派） |
+| 安全跳过 | entry 同期被 unregister → 计划条目安全跳过（lookup nil） |
+
+### 未验证边界（不宣称）
+
+- directory 为进程内组件（未跨进程持久化/同步）；跨进程 directory（PG 表或 gossip）留待多节点实验迭代。
+- Roster 探测仍为心跳超时模型；placement 未含资源量化（仅能力集合匹配）。
+- rebalancing 策略为简单 overflow 迁移（无全局最优/一致性保证声明）。
 ## M5（首项）：持久流（2026-11-15）
 
 ### 命令与结果

@@ -158,6 +158,20 @@ m.turn "apply",  OrderActor              do |actor, ctx, args| ... end  # strict
 read_only/improv 不占 strict 串行队列（写不饥饿）；improv 冲突显式拒绝给调用方。
 quiesce/drain 等待所有并发在飞。
 
+## 版本化目录与 placement（M5）
+
+```crystal
+directory = Troupe::VersionedDirectory.new
+directory.register(id, "silo-1")                 # per-entry version 单调 + view_version
+placer = Troupe::Placer.new(directory)
+placer.set_capabilities("silo-1", ["orders"])
+placer.place(["orders"])                          # 能力匹配 + 负载最少者
+rebalancer = Troupe::Rebalancer.new(ring, directory)
+rebalancer.apply(rebalancer.handoff_plan(["dead-node"])) # handoff/recovery（version 保护）
+```
+
+旧节点复活以旧 version 抢注册被拒；同节点改派为 no-op（旧计划重放保护）。
+
 ## 持久流（M5）
 
 ```crystal

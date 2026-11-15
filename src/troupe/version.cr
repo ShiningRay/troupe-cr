@@ -1,3 +1,3 @@
 module Troupe
-  VERSION = "0.18.0-dev.0"
+  VERSION = "0.19.0-dev.0"
 end

@@ -31,6 +31,7 @@ require "./troupe/show"
 require "./troupe/director"
 require "./troupe/stream"
 require "./troupe/stream_pg"
+require "./troupe/directory"
 require "./troupe/rehearsal"
 
 # Troupe.cr：Crystal idiomatic virtual actor 框架（对标 Orleans 语义，见 DESIGN.md）。

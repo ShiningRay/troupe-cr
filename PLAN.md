@@ -55,7 +55,7 @@
 ## M5：可靠消息、目录与互操作（统一 ADR 后）
 
 - [x] 持久流：事件日志、游标、ack/replay、保留、慢消费者和 Provider。（2026-11-15：`StreamStore` 契约 + Memory/PostgreSQL 双 Provider——事件日志 seq 全局单调（PG SEQUENCE）per-topic 保序、per-consumer 持久游标（ack GREATEST 只前进，回退拒绝）、不 ack 重放 at-least-once、retain_before 保留裁剪（慢消费者被裁事件丢失为显式代价）、StreamReader 分批 poll/poll_each 失败停止不越过/replay 显式重放；跨运行持久（PG 表）；12 例反例含真实 PG；优先复用成熟消息系统——当前自研最小实现，消息队列 Provider 适配列入 M6 评估）
-- [ ] 版本化 directory、capabilities/resource placement、handoff/recovery 与 activation rebalancing。
+- [x] 版本化 directory、capabilities/resource placement、handoff/recovery 与 activation rebalancing。（2026-11-15：`VersionedDirectory`——actor_id→(node, version) 注册表 per-entry 单调 + view_version 全局视图版本 + reassign version 保护（同节点 no-op/旧版本拒绝——旧节点复活抢注册反例）；`Placer`——capabilities 需求子集匹配 + entries 负载最少者入选（无匹配显式拒绝）；`Rebalancer`——死亡节点 handoff 计划（环后继漂移，其他节点 entries 不动）/activation rebalancing（新节点 overflow 迁移，旧计划重放被 version 保护拒绝）/同期 unregister 安全跳过；6 例反例。跨进程 directory 持久化与探测协议留待后续迭代）
 - [ ] 公共协议：canonical identity/hash、方法/schema ID、payload、错误、deadline/cancel、trace 和版本协商。
 - [ ] 与 troupe-planning golden fixtures/contract tests 对齐，再决定跨语言客户端或异构 silo。
 
