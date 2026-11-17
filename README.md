@@ -13,7 +13,7 @@
 - [持久化与所有权](docs/persistence.md)
 - [集群与协议](docs/cluster.md)
 - [当前验证](docs/verification.md)
-- [多语言统一规划](https://github.com/ShiningRay/troupe-planning)
+- [多语言统一规划](https://github.com/ShiningRay/troupe)
 
 ## 验证
 

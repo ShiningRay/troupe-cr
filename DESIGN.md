@@ -1,6 +1,6 @@
 # Troupe.cr 设计
 
-> 状态：M1 最小单机核心已实现（ActorId/manifest/Memory PropStore/Stage/ActorSlot/CallBoard/Intermission/Rehearsal，见 PLAN.md 与 docs/verification.md）；持久化 Provider、集群与协议尚未实现。以 Orleans 10.0 为主要语义参照；跨语言共同决策由 [troupe-planning](https://github.com/ShiningRay/troupe-planning) 协调。
+> 状态：M1 最小单机核心已实现（ActorId/manifest/Memory PropStore/Stage/ActorSlot/CallBoard/Intermission/Rehearsal，见 PLAN.md 与 docs/verification.md）；持久化 Provider、集群与协议尚未实现。以 Orleans 10.0 为主要语义参照；跨语言共同决策由 [troupe-planning](https://github.com/ShiningRay/troupe) 协调。
 
 ## 1. 目标
 
